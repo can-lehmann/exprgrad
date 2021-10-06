@@ -55,6 +55,11 @@ Although all shown examples already work, bugs are expected and important featur
 Please report any issues you might encounter.
 
 Exprgrad requires the LLVM C-API in order to be able to compile models.
+LLVM can be installed using `apt install llvm-dev` on Ubuntu or `dnf install llvm-devel` on Fedora.
+
+```bash
+$ nimble install https://github.com/can-lehmann/exprgrad
+```
 
 ## Documentation
 
@@ -159,7 +164,7 @@ If the output tensor is not yet declared, the `*` operator can be added after th
 y*{it} ++= input("x"){it} * 2.0
 ```
 
-More examples can be found in the `src/layers/base.nim` and `src/layers/dnn.nim` modules.
+More examples can be found in the `exprgrad/layers/base.nim` and `exprgrad/layers/dnn.nim` modules.
 
 #### Instructions
 
@@ -215,7 +220,7 @@ If a shape is specified unknown dimensions should have the size `-1`.
 
 Example: `input("x", [1, 28, 28, -1])`
 
-```
+```nim
 proc target*(fun: Fun, name: string): Fun
 ```
 
@@ -371,7 +376,7 @@ If you would like to contribute to exprgrad, the following tasks might be of int
 
 ### Project Structure
 
-The following diagram shows a simplified compilation pipeline which displays the functions of the different modules (files in `src/`) of exprgrad's compiler.
+The following diagram shows a simplified compilation pipeline which displays the functions of the different modules (files in `exprgrad/`) of exprgrad's compiler.
 
 ```
           parser       passes       llvmgen
