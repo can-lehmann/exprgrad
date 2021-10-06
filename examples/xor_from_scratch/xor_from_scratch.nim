@@ -13,7 +13,7 @@
 # limitations under the License.
 
 import std/random
-import exprgrad, exprgrad/layers/[base, dnn]
+import exprgrad
 randomize(10)
 
 hidden*[x, y] ++= input("x")[it, y] * param([4, 2])[x, it]

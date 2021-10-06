@@ -92,7 +92,7 @@ proc `*`*[T](a, b: Tensor[T]): Tensor[T] =
 As you can see, the program in exprgrad's domain-specific language is basically equivalent to the last line of the Nim program.
 The shape of the output tensor and the iteration ranges of all loops are inferred automatically.
 
-In contrast to Nim, exprgrad's type system is very simple as it supports includes three types.
+In contrast to Nim, exprgrad's type system is very simple as it includes only three types.
 
 | Name      | Purpose                                            |
 | --------- | -------------------------------------------------- |

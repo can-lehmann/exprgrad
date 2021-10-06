@@ -514,20 +514,18 @@ proc generate*(program: Program) =
           it += 1
 
 proc reorder_loops*(kernel: Kernel) =
-  type Edges = array[TensorOpKind, seq[LoopId]]
-  
   var loop_iters = new_seq[LoopId](kernel.regs.len)
   for it, loop in kernel.loops:
     loop_iters[loop.iter] = LoopId(it + 1)
   
-  var graph = new_seq[Edges](kernel.loops.len)
+  var graph = new_seq[array[TensorOpKind, seq[LoopId]]](kernel.loops.len)
   for kind, op in kernel.tensor_ops:
     for it in 1..<op.dims.len:
       for reg_a, factor_a in op.dims[it - 1].factors:
         for reg_b, factor_b in op.dims[it].factors:
           if loop_iters[reg_a] != LoopId(0) and
              loop_iters[reg_b] != LoopId(0):
-            graph[loop_iters[reg_b]][kind].add(loop_iters[reg_a])
+            graph[int(loop_iters[reg_b]) - 1][kind].add(loop_iters[reg_a])
   
   const SCORE_VALS = [OpRead: 10, OpWrite: 1]
   var scores = new_seq[int](kernel.loops.len)
@@ -557,9 +555,9 @@ proc reorder_loops*(kernel: Kernel) =
       for target in edges:
         scores[target] -= SCORE_VALS[kind]
   
-  var new_loops = new_seq[Loop]()
+  var new_loops = new_seq[Loop](order.len)
   for it, loop_id in order:
-    new_loops.add(kernel.loops[loop_id])
+    new_loops[it] = kernel.loops[loop_id]
   kernel.loops = new_loops
 
 proc reorder_loops*(program: Program) =
