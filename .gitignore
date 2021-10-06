@@ -1,7 +1,7 @@
 exprgrad/wrappers/llvm
 exprgrad/wrappers/my_module.bc
 examples/xor/xor
-examples/xor_layers/xor_layers
+examples/xor_from_scratch/xor_from_scratch
 examples/matmul/matmul
 examples/fashion_mnist/data/
 examples/fashion_mnist/fashion_mnist

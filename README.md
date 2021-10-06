@@ -4,7 +4,7 @@ Exprgrad is an experimental deep learning framework for Nim based on a different
 Exprgrad makes creating and training neural networks easy: 
 
 ```nim
-import std/[sugar, random]
+import std/random
 import exprgrad, exprgrad/layers/[base, dnn]
 randomize(10)
 
