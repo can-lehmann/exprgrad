@@ -14,7 +14,7 @@
 
 # Simple API used to compile and run models in exprgrad
 
-import std/[tables, sets, random]
+import std/[tables, sets]
 import ir, parser, passes, tensors, llvmgen, irprint, cgen
 
 type

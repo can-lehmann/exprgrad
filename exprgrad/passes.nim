@@ -120,10 +120,7 @@ proc infer_types*(program: Program) =
       kernel.infer_types()
 
 proc fold_setup(index: var LinearIndex, kernel: Kernel) =
-  var
-    regs = new_seq[LinearIndex](kernel.regs.len)
-    setup = new_seq[Instr]()
-  
+  var regs = new_seq[LinearIndex](kernel.regs.len)
   for loop in kernel.loops:
     # TODO: How should we handle registers defined in the setup section of the kernel?
     regs[loop.iter] = LinearIndex(

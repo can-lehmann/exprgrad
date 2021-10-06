@@ -14,7 +14,7 @@
 
 # A simple unit-testing framework
 
-import std/[terminal, macros, sets, sequtils]
+import std/[terminal, macros, sets]
 
 type TestError = ref object of CatchableError
   env: seq[(string, string)]
@@ -51,7 +51,7 @@ template test*(name: string, body: untyped) =
     stdout.write("\n")
   stdout.flush_file()
 
-template subtest(body: untyped) =
+template subtest*(body: untyped) =
   block:
     body
 

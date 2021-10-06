@@ -14,7 +14,7 @@
 
 # An experimental deep learning framework
 
-import std/[macros, strutils, tables, hashes, algorithm]
+import std/[macros]
 import exprgrad/[tensors, parser, model, ir]
 export tensors
 export Fun, `++=`, with_shape, copy_shape, make_opt

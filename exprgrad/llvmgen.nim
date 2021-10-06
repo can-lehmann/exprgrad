@@ -14,12 +14,9 @@
 
 # Compile exprgrad's DSL to LLVM IR
 
-import std/[tables, hashes, sets, sequtils]
+import std/[tables, sets]
 import wrappers/llvm
 import ir
-
-proc `==`(a, b: BasicBlockRef): bool = pointer(a) == pointer(b)
-proc hash(x: BasicBlockRef): Hash = hash(cast[int](pointer(x)))
 
 proc to_llvm(scalar_type: ScalarType): TypeRef =
   case scalar_type:
@@ -92,12 +89,12 @@ proc init_builtin(module: ModuleRef, program: Program): Builtin =
   result.epoch = module.add_function("epoch", result.epoch_signature())
   
   let type_postfix = [Scalar32: "f32", Scalar64: "f64"][result.scalar_type]
-  result.sin = module.add_function("llvm.sin." & type_postfix, result.scalar_unary_intrinsic_signature())
-  result.cos = module.add_function("llvm.cos." & type_postfix, result.scalar_unary_intrinsic_signature())
-  result.exp = module.add_function("llvm.exp." & type_postfix, result.scalar_unary_intrinsic_signature())
-  result.ln = module.add_function("llvm.log." & type_postfix, result.scalar_unary_intrinsic_signature())
-  result.sqrt = module.add_function("llvm.sqrt." & type_postfix, result.scalar_unary_intrinsic_signature())
-  result.pow = module.add_function("llvm.pow." & type_postfix, result.scalar_binary_intrinsic_signature())
+  result.sin = module.add_function(cstring("llvm.sin." & type_postfix), result.scalar_unary_intrinsic_signature())
+  result.cos = module.add_function(cstring("llvm.cos." & type_postfix), result.scalar_unary_intrinsic_signature())
+  result.exp = module.add_function(cstring("llvm.exp." & type_postfix), result.scalar_unary_intrinsic_signature())
+  result.ln = module.add_function(cstring("llvm.log." & type_postfix), result.scalar_unary_intrinsic_signature())
+  result.sqrt = module.add_function(cstring("llvm.sqrt." & type_postfix), result.scalar_unary_intrinsic_signature())
+  result.pow = module.add_function(cstring("llvm.pow." & type_postfix), result.scalar_binary_intrinsic_signature())
 
 type Context = ref object
   program: Program
