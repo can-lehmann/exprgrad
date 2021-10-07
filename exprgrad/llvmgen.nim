@@ -77,12 +77,12 @@ proc epoch_signature(builtin: Builtin): TypeRef =
 proc task_proc_signature(): TypeRef =
   function_type(void_type(), [
     model_ptr_type(), nim_int_type(), nim_int_type(), void_ptr_type()
-  ]).pointer_type(0)
+  ])
 
 proc run_threads_signature(builtin: Builtin): TypeRef =
   function_type(void_type(), [
     model_ptr_type(), nim_int_type(), nim_int_type(), void_ptr_type(),
-    task_proc_signature()
+    task_proc_signature().pointer_type(0)
   ])
 
 proc join_threads_signature(builtin: Builtin): TypeRef =
@@ -130,6 +130,8 @@ type Context = ref object
 
 proc `[]`(ctx: Context, reg: RegId): ValueRef = ctx.regs[reg]
 proc `[]=`(ctx: Context, reg: RegId, val: ValueRef) = ctx.regs[reg] = val
+proc `[]`(ctx: Context, tensor: TensorId): ValueRef = ctx.tensors[tensor]
+proc `[]=`(ctx: Context, tensor: TensorId, val: ValueRef) = ctx.tensors[tensor] = val
 
 proc scalar_type(ctx: Context): TypeRef =
   ctx.program.scalar_type.to_llvm()
@@ -220,7 +222,7 @@ proc to_llvm(instrs: seq[Instr], ctx: Context) =
         let
           align = cuint(4) # TODO
           value_ptr = builder.build_gep2(
-            ctx.scalar_type(), ctx.tensors[instr.tensor],
+            ctx.scalar_type(), ctx[instr.tensor],
             [ctx[instr.args[0]]], "value_ptr"
           )
           value = builder.build_load2(
@@ -287,6 +289,78 @@ proc to_llvm(instrs: seq[Instr], ctx: Context) =
           [header_block, incr_block]
         )
         builder.position_builder_at_end(end_block)
+      of InstrThreads:
+        var closure_fields: seq[TypeRef] = @[]
+        for reg in instr.threads_closure:
+          closure_fields.add(ctx.kernel.regs[reg].typ.to_llvm(ctx))
+        for tensor in instr.threads_tensors:
+          closure_fields.add(pointer_type(ctx.scalar_type(), 0))
+        let closure_type = struct_type(closure_fields)
+        
+        let
+          current_block = builder.get_insert_block()
+          sig = task_proc_signature()
+          task = ctx.module.add_function(cstring($ctx.kernel_id & "_task"), sig)
+          entry = task.append_basic_block(cstring("entry"))
+        
+        let task_ctx = Context(
+          program: ctx.program,
+          target: ctx.target,
+          kernel: ctx.kernel,
+          kernel_id: ctx.kernel_id,
+          module: ctx.module,
+          builder: ctx.builder,
+          fn: task,
+          builtin: ctx.builtin,
+          regs: new_seq[ValueRef](ctx.kernel.regs.len),
+          tensors: new_seq[ValueRef](ctx.program.tensors.len)
+        )
+        task_ctx[instr.threads_begin] = task.get_param(1)
+        task_ctx[instr.threads_end] = task.get_param(2)
+        
+        var offset = 0
+        builder.position_builder_at_end(current_block)
+        let closure = builder.build_alloca(closure_type, "closure")
+        builder.position_builder_at_end(entry)
+        let task_closure = builder.build_bit_cast(task.get_param(3), closure_type.pointer_type(0), "closure")
+        
+        template make_closure(ids) =
+          for id in ids:
+            block:
+              builder.position_builder_at_end(current_block)
+              let field_ptr = builder.build_gep2(closure_type, closure, [
+                const_int32(0), const_int32(int32(offset))
+              ], "field_ptr")
+              discard builder.build_store(ctx[id], field_ptr)
+            block:
+              builder.position_builder_at_end(entry)
+              let field_ptr = builder.build_gep2(closure_type, task_closure, [
+                const_int32(0), const_int32(int32(offset))
+              ], "field_ptr")
+              task_ctx[id] = builder.build_load2(closure_fields[offset], field_ptr, cstring($id))
+            offset += 1
+        
+        make_closure(instr.threads_closure)
+        make_closure(instr.threads_tensors)
+        
+        builder.position_builder_at_end(current_block)
+        discard builder.build_call2(ctx.builtin.run_threads_signature(), ctx.builtin.run_threads, [
+          ctx.fn.get_param(0), ctx[instr.args[0]], ctx[instr.args[1]],
+          builder.build_bit_cast(closure, void_ptr_type(), "data"),
+          task
+        ], cstring(""))
+        
+        builder.position_builder_at_end(entry)
+        instr.threads_body.to_llvm(task_ctx)
+        discard builder.build_ret()
+        
+        builder.position_builder_at_end(current_block)
+        discard builder.build_call2(
+          ctx.builtin.join_threads_signature(),
+          ctx.builtin.join_threads,
+          [ctx.fn.get_param(0)],
+          cstring("")
+        )
       else:
         raise GeneratorError(msg: "Unable to generate LLVM IR for " & $instr.kind)
     
@@ -327,7 +401,7 @@ proc to_llvm*(program: Program): ModuleRef =
       tensors: new_seq[ValueRef](program.tensors.len)
     )
     for tensor_id in target.tensors:
-      ctx.tensors[tensor_id] = builder.build_call2(
+      ctx[tensor_id] = builder.build_call2(
         ctx.builtin.tensor_signature(),
         ctx.builtin.tensor,
         [ctx.fn.get_param(0), const_nim_int(int(tensor_id))],

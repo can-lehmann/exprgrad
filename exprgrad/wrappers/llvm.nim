@@ -21,7 +21,7 @@
 
 type
   ModuleRef* {.importc: "LLVMModuleRef", header: "<llvm-c/Core.h>".} = distinct pointer
-  TypeRef* {.importc: "LLVMTypeRef", header: "<llvm-c/Core.h>".} = object
+  TypeRef* {.importc: "LLVMTypeRef", header: "<llvm-c/Core.h>".} = distinct pointer
   ValueRef* {.importc: "LLVMValueRef", header: "<llvm-c/Core.h>".} = distinct pointer
   BasicBlockRef* {.importc: "LLVMBasicBlockRef", header: "<llvm-c/Core.h>".} = distinct pointer
   BuilderRef* {.importc: "LLVMBuilderRef", header: "<llvm-c/Core.h>".} = object
@@ -63,6 +63,7 @@ type
     CodeModelKernel, CodeModelMedium, CodeModelLarge
 
 proc is_nil*(x: ValueRef): bool {.borrow.}
+proc is_nil*(x: TypeRef): bool {.borrow.}
 proc is_nil*(x: ModuleRef): bool {.borrow.}
 proc is_nil*(x: ExecutionEngineRef): bool {.borrow.}
 proc is_nil*(x: PassManagerRef): bool {.borrow.}
@@ -120,6 +121,7 @@ proc dispose_message*(msg: cstring) {.importc: "LLVMDisposeMessage".}
 proc get_value_name2*(value: ValueRef, len: ptr csize_t): cstring {.importc: "LLVMGetValueName2".}
 proc set_value_name2*(value: ValueRef, name: cstring, len: csize_t) {.importc: "LLVMSetValueName2".}
 proc print_value_to_string*(value: ValueRef): cstring {.importc: "LLVMPrintValueToString".}
+proc print_type_to_string*(value: TypeRef): cstring {.importc: "LLVMPrintTypeToString".}
 
 proc get_alignment*(val: ValueRef): cuint {.importc: "LLVMGetAlignment".}
 proc set_alignment*(val: ValueRef, bytes: cuint) {.importc: "LLVMSetAlignment".}
@@ -224,6 +226,11 @@ proc `name=`*(value: ValueRef, name: cstring) =
 
 proc `$`*(value: ValueRef): string =
   var str = value.print_value_to_string()
+  result = $str
+  dispose_message(str)
+
+proc `$`*(value: TypeRef): string =
+  var str = value.print_type_to_string()
   result = $str
   dispose_message(str)
 

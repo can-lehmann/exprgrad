@@ -77,11 +77,17 @@ proc infer_types(instrs: seq[Instr], regs: var seq[Register]) =
           else: discard
       of InstrExtern: raise TypeError(msg: $instr.kind & " is not valid at runtime")
       of InstrEpoch: ret_type = Type(kind: TypeIndex, count: 1)
-      of InstrLoop, InstrThreads:
+      of InstrLoop:
         if arg_type(0).kind != TypeIndex or arg_type(1).kind != TypeIndex:
           raise TypeError(msg: "Loop bounds must be of type Index")
         regs[instr.loop_iter].typ = Type(kind: TypeIndex, count: 1)
         instr.loop_body.infer_types(regs)
+      of InstrThreads:
+        if arg_type(0).kind != TypeIndex or arg_type(1).kind != TypeIndex:
+          raise TypeError(msg: "Thread range must be of type Index")
+        regs[instr.threads_begin].typ = Type(kind: TypeIndex, count: 1)
+        regs[instr.threads_end].typ = Type(kind: TypeIndex, count: 1)
+        instr.threads_body.infer_types(regs)
 
 proc infer_types(expr: Expr, regs: var seq[Register]) =
   expr.instrs.infer_types(regs)
@@ -708,6 +714,13 @@ proc collect_tensors(instrs: seq[Instr], tensors: var HashSet[TensorId]) =
   for instr in instrs:
     if instr.tensor != TensorId(0):
       tensors.incl(instr.tensor)
+    case instr.kind:
+      of InstrThreads: instr.threads_body.collect_tensors(tensors)
+      of InstrLoop: instr.loop_body.collect_tensors(tensors)
+      else: discard
+
+proc collect_tensors(instrs: seq[Instr]): HashSet[TensorId] =
+  instrs.collect_tensors(result)
 
 proc collect_tensors(kernel: Kernel, tensors: var HashSet[TensorId]) =
   for kind, op in kernel.tensor_ops:
@@ -1363,7 +1376,45 @@ proc fuse_loops*(program: Program) =
         producers[kernel.write.tensor] = id
       
       target.kernels[it] = kernel
+
+proc choose_parallel*(program: Program) =
+  program.assert_pass("choose_parallel",
+    requires={StageIndependent},
+    produces={},
+    preserves=ALL_STAGES
+  )
   
+  const LOOP_COUNT = [CompileCpu: 0, CompileThreads: 1]
+  for name, target in program.targets:
+    if LOOP_COUNT[target.compile_target] > 0:
+      for kernel in target.kernels:
+        var count = LOOP_COUNT[target.compile_target]
+        for loop in kernel.loops.mitems:
+          if loop.mode >= LoopIndependent:
+            loop.mode = LoopParallel 
+            count -= 1
+          else:
+            break # TODO: Reorder loops?
+          if count <= 0:
+            break
+
+proc collect_used(instrs: seq[Instr]): HashSet[RegId] =
+  for instr in instrs:
+    for arg in instr.args:
+      result.incl(arg)
+    case instr.kind:
+      of InstrThreads: result = result.union(instr.threads_body.collect_used())
+      of InstrLoop: result = result.union(instr.loop_body.collect_used())
+      else: discard
+
+proc collect_defined(instrs: seq[Instr]): HashSet[RegId] =
+  for instr in instrs:
+    if instr.res != RegId(0):
+      result.incl(instr.res)
+    case instr.kind:
+      of InstrThreads: result = result.union(instr.threads_body.collect_defined())
+      of InstrLoop: result = result.union(instr.loop_body.collect_defined())
+      else: discard
 
 proc inline_loops(kernel: Kernel) =
   var body = kernel.expr.instrs
@@ -1371,13 +1422,37 @@ proc inline_loops(kernel: Kernel) =
     let loop = kernel.loops[it]
     kernel.setup.add(loop.start.setup)
     kernel.setup.add(loop.stop.setup)
-    body = @[
-      Instr(kind: InstrLoop,
+    if loop.mode >= LoopParallel:
+      var closure: seq[RegId] = @[]
+      let
+        used = body.collect_used()
+        defined = kernel.setup.collect_defined()
+      for reg in used:
+        if reg in defined:
+          closure.add(reg)
+      
+      var tensors: seq[TensorId] = @[]
+      for tensor in body.collect_tensors():
+        tensors.add(tensor)
+      
+      let (range_begin, range_end) = (kernel.regs.alloc(), kernel.regs.alloc())
+      body = @[Instr(kind: InstrThreads,
+        args: @[loop.start.setup[^1].res, loop.stop.setup[^1].res],
+        threads_begin: range_begin, threads_end: range_end,
+        threads_closure: closure,
+        threads_tensors: tensors,
+        threads_body: @[Instr(kind: InstrLoop,
+          args: @[range_begin, range_end],
+          loop_iter: loop.iter,
+          loop_body: body
+        )]
+      )]
+    else:
+      body = @[Instr(kind: InstrLoop,
         args: @[loop.start.setup[^1].res, loop.stop.setup[^1].res],
         loop_iter: loop.iter,
         loop_body: body
-      )
-    ]
+      )]
   kernel.setup.add(body)
   kernel.loops = @[]
   kernel.expr = Expr()

@@ -30,7 +30,7 @@ proc fill_buffer(stream: var ReadStream) =
 
 proc open_read_stream*(path: string, buffer_size: int = 2 ^ 14): ReadStream =
   assert buffer_size > 0
-  if not exists_file(path):
+  if not file_exists(path):
     raise new_exception(IoError, "Unable to open file " & path)
   result.file = open(path, fmRead)
   result.buffer = new_string(buffer_size)

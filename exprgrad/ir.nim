@@ -62,9 +62,15 @@ type
       of InstrBoolean: boolean_lit*: bool
       of InstrExtern: extern*: string
       of InstrShape: dim*: int
-      of InstrLoop, InstrThreads:
+      of InstrLoop:
         loop_iter*: RegId
         loop_body*: seq[Instr]
+      of InstrThreads:
+        threads_closure*: seq[RegId]
+        threads_tensors*: seq[TensorId]
+        threads_begin*: RegId
+        threads_end*: RegId
+        threads_body*: seq[Instr]
       else: discard
   
   Register* = object

@@ -128,7 +128,7 @@ when TARGET_SUPPORTS_THREADS:
                               start, stop: int,
                               data: pointer,
                               fn: TaskProc) =
-    let size = start - stop
+    let size = stop - start
     var offset = start
     for thread in 0..<thread_pool.len:
       var thread_size = size div thread_pool.len
@@ -148,8 +148,8 @@ else:
   {.push cdecl.}
   proc builtin_run_threads[T](model: ModelPtr[T],
                               start, stop: int,
-                              fn: TaskProc,
-                              data: pointer) = discard
+                              data: pointer,
+                              fn: TaskProc) = discard
   proc builtin_join_threads[T](model: ModelPtr[T]) = discard
   {.pop.}
 
@@ -223,6 +223,7 @@ proc compile*[T](graphs: varargs[Fun]): Model[T] =
   program.infer_static_shapes()
   program.infer_types()
   program.reorder_loops()
+  program.choose_parallel()
   program.infer_loop_bounds()
   program.inline_tensor_ops()
   program.inline_static_shapes()
