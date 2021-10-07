@@ -41,6 +41,7 @@ proc close*(stream: var ReadStream) =
     stream.file.close()
     stream.file = nil
 
+{.push inline.}
 proc peek_char*(stream: ReadStream): char =
   stream.buffer[stream.cur]
 
@@ -59,6 +60,7 @@ proc at_end*(stream: ReadStream): bool = stream.left <= 0
 proc skip*(stream: var ReadStream, count: int) =
   for it in 0..<count:
     discard stream.read_char()
+{.pop.}
 
 type WriteStream* = object
   file: File
@@ -76,6 +78,7 @@ proc write_all(stream: var WriteStream) =
     raise new_exception(ValueError, "Failed to write buffer")
   stream.cur = 0
 
+{.push inline.}
 proc write*(stream: var WriteStream, x: char) =
   stream.buffer[stream.cur] = x
   stream.cur += 1
@@ -92,6 +95,7 @@ proc write*(stream: var WriteStream, str: string) =
   # TODO: Optimize
   for chr in str:
     stream.write(chr)
+{.pop.}
 
 proc flush*(stream: var WriteStream) =
   if not stream.file.is_nil:
