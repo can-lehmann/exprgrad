@@ -35,6 +35,9 @@ type Builtin = object
   debug_scalar: ValueRef
   # Values
   epoch: ValueRef
+  # Threads
+  run_threads: ValueRef
+  join_threads: ValueRef
   # Intrinsics
   sin: ValueRef
   cos: ValueRef
@@ -44,6 +47,7 @@ type Builtin = object
   pow: ValueRef
 
 proc model_ptr_type(): TypeRef = pointer_type(int8_type(), 0)
+proc void_ptr_type(): TypeRef = pointer_type(int8_type(), 0)
 
 proc tensor_signature(builtin: Builtin): TypeRef =
   function_type(pointer_type(builtin.scalar_type.to_llvm(), 0), [
@@ -70,6 +74,20 @@ proc debug_scalar_signature(builtin: Builtin): TypeRef =
 proc epoch_signature(builtin: Builtin): TypeRef =
   function_type(nim_int_type(), [model_ptr_type()])
 
+proc task_proc_signature(): TypeRef =
+  function_type(void_type(), [
+    model_ptr_type(), nim_int_type(), nim_int_type(), void_ptr_type()
+  ]).pointer_type(0)
+
+proc run_threads_signature(builtin: Builtin): TypeRef =
+  function_type(void_type(), [
+    model_ptr_type(), nim_int_type(), nim_int_type(), void_ptr_type(),
+    task_proc_signature()
+  ])
+
+proc join_threads_signature(builtin: Builtin): TypeRef =
+  function_type(void_type(), [model_ptr_type()])
+
 proc scalar_unary_intrinsic_signature(builtin: Builtin): TypeRef =
   function_type(builtin.scalar_type.to_llvm(), [builtin.scalar_type.to_llvm()])
 
@@ -87,6 +105,8 @@ proc init_builtin(module: ModuleRef, program: Program): Builtin =
   result.debug_index = module.add_function("debug_index", result.debug_index_signature())
   result.debug_scalar = module.add_function("debug_scalar", result.debug_scalar_signature())
   result.epoch = module.add_function("epoch", result.epoch_signature())
+  result.run_threads = module.add_function("run_threads", result.run_threads_signature())
+  result.join_threads = module.add_function("join_threads", result.join_threads_signature())
   
   let type_postfix = [Scalar32: "f32", Scalar64: "f64"][result.scalar_type]
   result.sin = module.add_function(cstring("llvm.sin." & type_postfix), result.scalar_unary_intrinsic_signature())
@@ -230,6 +250,43 @@ proc to_llvm(instrs: seq[Instr], ctx: Context) =
         res = builder.build_call2(ctx.builtin.epoch_signature(),
           ctx.builtin.epoch, [ctx.fn.get_param(0)], cstring($instr.res)
         )
+      of InstrLoop:
+        let
+          header_block = builder.get_insert_block()
+          cond_block = ctx.fn.append_basic_block("cond")
+          body_block = ctx.fn.append_basic_block("body")
+          end_block = ctx.fn.append_basic_block("end")
+          incr_block = ctx.fn.append_basic_block("incr")
+        discard builder.build_br(cond_block)
+        builder.position_builder_at_end(cond_block)
+        ctx[instr.loop_iter] = builder.build_phi(
+          ctx.kernel.regs[instr.loop_iter].typ.to_llvm(ctx),
+          cstring("iter_" & $instr.loop_iter)
+        )
+        let
+          cond = builder.build_icmp_eq(
+            ctx[instr.loop_iter],
+            ctx[instr.args[1]],
+            "exitcond"
+          )
+        discard builder.build_cond_br(cond, end_block, body_block)
+        builder.position_builder_at_end(body_block)
+        instr.loop_body.to_llvm(ctx)
+        discard builder.build_br(incr_block)
+        
+        builder.position_builder_at_end(incr_block)
+        let new_iter = builder.build_add(
+          ctx[instr.loop_iter],
+          const_nim_int(1),
+          "incr_iter"
+        )
+        discard builder.build_br(cond_block)
+        
+        ctx[instr.loop_iter].add_incoming(
+          [ctx[instr.args[0]], new_iter],
+          [header_block, incr_block]
+        )
+        builder.position_builder_at_end(end_block)
       else:
         raise GeneratorError(msg: "Unable to generate LLVM IR for " & $instr.kind)
     
@@ -237,79 +294,20 @@ proc to_llvm(instrs: seq[Instr], ctx: Context) =
       assert instr.res != RegId(0)
       ctx[instr.res] = res
 
-type ControlFlowScope = HSlice[BasicBlockRef, BasicBlockRef]
-
-proc bounds_to_llvm(loop: Loop, ctx: Context) =
-  loop.start.setup.to_llvm(ctx)
-  loop.stop.setup.to_llvm(ctx)
-
-proc to_llvm(loop: Loop,
-             scope: ControlFlowScope,
-             ctx: Context): ControlFlowScope =
-  let builder = ctx.builder
-  builder.position_builder_at_end(scope.a)
-  
-  let
-    cond_block = ctx.fn.append_basic_block("cond")
-    body_block = ctx.fn.append_basic_block("body")
-  discard builder.build_br(cond_block)
-  builder.position_builder_at_end(cond_block)
-  ctx[loop.iter] = builder.build_phi(
-    ctx.kernel.regs[loop.iter].typ.to_llvm(ctx),
-    cstring("iter_" & $loop.iter)
-  )
-  let
-    cond = builder.build_icmp_eq(
-      ctx[loop.iter],
-      ctx[loop.stop.setup[^1].res],
-      "exitcond"
-    )
-  discard builder.build_cond_br(cond, scope.b, body_block)
-  
-  let incr_block = ctx.fn.append_basic_block("incr")
-  builder.position_builder_at_end(incr_block)
-  let new_iter = builder.build_add(
-    ctx[loop.iter],
-    const_nim_int(1),
-    "incr_iter"
-  )
-  discard builder.build_br(cond_block)
-  
-  ctx[loop.iter].add_incoming(
-    [ctx[loop.start.setup[^1].res], new_iter],
-    [scope.a, incr_block]
-  )
-  
-  result = body_block..incr_block
-
 proc to_llvm(kernel: Kernel, kernel_id: KernelId, ctx: Context) =
   let
     builder = ctx.builder
     kernel_block = ctx.fn.append_basic_block(cstring($kernel_id))
-    kernel_end_block = ctx.fn.append_basic_block(cstring($kernel_id & "_end"))
   discard builder.build_br(kernel_block)
   builder.position_builder_at_end(kernel_block)
   
   ctx.regs = new_seq[ValueRef](kernel.regs.len)
-  
   kernel.setup.to_llvm(ctx)
-  for loop in kernel.loops:
-    loop.bounds_to_llvm(ctx)
-  
-  var scope = kernel_block..kernel_end_block
-  for loop in kernel.loops:
-    scope = loop.to_llvm(scope, ctx)
-  
-  builder.position_builder_at_end(scope.a)
-  kernel.expr.instrs.to_llvm(ctx)
-  discard builder.build_br(scope.b)
-  
-  builder.position_builder_at_end(kernel_end_block)
 
 proc to_llvm*(program: Program): ModuleRef =
   program.assert_gen("llvm", requires={
     StageTyped, StageGenerated, StageTensors, StageShapes,
-    StageBounds, StageTensorInstrs, StageSortedShapes
+    StageLoops, StageTensorInstrs, StageSortedShapes
   })
 
   result = module_create_with_name("module")
@@ -351,6 +349,8 @@ type
     debug_index*: pointer
     debug_scalar*: pointer
     epoch*: pointer
+    run_threads*: pointer
+    join_threads*: pointer
   
   Jit* = ref object
     module: ModuleRef

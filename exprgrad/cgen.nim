@@ -115,7 +115,7 @@ proc to_c(instrs: seq[Instr], ctx: Context): string =
           index = ctx.regs[instr.args[0]]
           value = ctx.regs[instr.args[1]]
         expr = $instr.tensor & "[" & index & "] += " & value
-      of InstrLog, InstrExtern:
+      of InstrLog, InstrExtern, InstrLoop, InstrThreads:
         raise GeneratorError(msg: "Unable to generate c source for " & $instr.kind)
     
     var stmt = ""

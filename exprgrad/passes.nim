@@ -77,6 +77,11 @@ proc infer_types(instrs: seq[Instr], regs: var seq[Register]) =
           else: discard
       of InstrExtern: raise TypeError(msg: $instr.kind & " is not valid at runtime")
       of InstrEpoch: ret_type = Type(kind: TypeIndex, count: 1)
+      of InstrLoop, InstrThreads:
+        if arg_type(0).kind != TypeIndex or arg_type(1).kind != TypeIndex:
+          raise TypeError(msg: "Loop bounds must be of type Index")
+        regs[instr.loop_iter].typ = Type(kind: TypeIndex, count: 1)
+        instr.loop_body.infer_types(regs)
 
 proc infer_types(expr: Expr, regs: var seq[Register]) =
   expr.instrs.infer_types(regs)
@@ -1359,3 +1364,34 @@ proc fuse_loops*(program: Program) =
       
       target.kernels[it] = kernel
   
+
+proc inline_loops(kernel: Kernel) =
+  var body = kernel.expr.instrs
+  for it in countdown(kernel.loops.len - 1, 0):
+    let loop = kernel.loops[it]
+    kernel.setup.add(loop.start.setup)
+    kernel.setup.add(loop.stop.setup)
+    body = @[
+      Instr(kind: InstrLoop,
+        args: @[loop.start.setup[^1].res, loop.stop.setup[^1].res],
+        loop_iter: loop.iter,
+        loop_body: body
+      )
+    ]
+  kernel.setup.add(body)
+  kernel.loops = @[]
+  kernel.expr = Expr()
+
+proc inline_loops*(program: Program) =
+  program.assert_pass("inline_loops",
+    requires={StageBounds},
+    produces={StageLoops},
+    preserves={
+      StageGenerated, StageTensors, StageShapes,
+      StageSortedShapes, StageTensorInstrs
+    }
+  )
+  
+  for name, target in program.targets:
+    for kernel in target.kernels:
+      kernel.inline_loops()

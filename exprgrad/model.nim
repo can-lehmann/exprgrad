@@ -31,6 +31,7 @@ type
 
 proc `$`(kernel: Kernel): string = $(kernel[])
 
+{.push cdecl.}
 proc builtin_tensor[T](model: ModelPtr[T], id: int): ptr UncheckedArray[T] =
   result = model[].tensors[TensorId(id)].data_ptr
 
@@ -55,6 +56,102 @@ proc builtin_debug_scalar[T](model: ModelPtr[T], value: T) =
 
 proc builtin_epoch[T](model: ModelPtr[T]): int =
   result = model.epoch
+{.pop.}
+
+type TaskProc = proc(model: pointer, a, b: int, data: pointer) {.cdecl, gcsafe.}
+
+when TARGET_SUPPORTS_THREADS:
+  import osproc
+  
+  type
+    Task = object
+      fn: TaskProc
+      model: pointer
+      data: pointer
+      a: int
+      b: int
+  
+    ThreadData = object
+      tasks: ptr Channel[Task]
+      done: ptr Channel[bool]
+    
+    ThreadPool = object
+      threads: seq[Thread[ThreadData]]
+      data: seq[ThreadData]
+      open: seq[int]
+  
+  proc thread_handler(data: ThreadData) {.gcsafe.} =
+    while true:
+      let task = data.tasks[].recv()
+      try:
+        task.fn(task.model, task.a, task.b, task.data)
+      except CatchableError as err:
+        data.done[].send(false)
+        continue
+      data.done[].send(true)
+  
+  proc alloc_channel[T](): ptr Channel[T] =
+    result = cast[ptr Channel[T]](alloc_shared0(sizeof(Channel[T])))
+    result[].open()
+  
+  proc init_thread_pool(): ThreadPool =
+    result.threads = new_seq[Thread[ThreadData]](count_processors())
+    result.open = new_seq[int](result.threads.len)
+    for it, thread in result.threads.mpairs:
+      let data = ThreadData(
+        tasks: alloc_channel[Task](),
+        done: alloc_channel[bool]()
+      )
+      result.data.add(data)
+      create_thread(thread, thread_handler, data)
+      thread.pin_to_cpu(it)
+  
+  proc len(pool: ThreadPool): int = pool.threads.len
+  
+  proc enqueue(pool: var ThreadPool, thread: int, task: Task) =
+    pool.data[thread].tasks[].send(task)
+    pool.open[thread] += 1
+  
+  proc join(pool: var ThreadPool, thread: int) =
+    while pool.open[thread] > 0:
+      discard pool.data[thread].done[].recv()
+      pool.open[thread] -= 1
+  
+  proc join(pool: var ThreadPool) =
+    for it in 0..<pool.len:
+      pool.join(it)
+  
+  var thread_pool = init_thread_pool()
+  
+  {.push cdecl.}
+  proc builtin_run_threads[T](model: ModelPtr[T],
+                              start, stop: int,
+                              data: pointer,
+                              fn: TaskProc) =
+    let size = start - stop
+    var offset = start
+    for thread in 0..<thread_pool.len:
+      var thread_size = size div thread_pool.len
+      if thread < size mod thread_pool.len:
+        thread_size += 1
+      thread_pool.enqueue(thread, Task(
+        fn: fn, data: data, model: model,
+        a: offset, b: offset + thread_size
+      ))
+      offset += thread_size
+    assert offset == stop
+  
+  proc builtin_join_threads[T](model: ModelPtr[T]) =
+    thread_pool.join()
+  {.pop.}
+else:
+  {.push cdecl.}
+  proc builtin_run_threads[T](model: ModelPtr[T],
+                              start, stop: int,
+                              fn: TaskProc,
+                              data: pointer) = discard
+  proc builtin_join_threads[T](model: ModelPtr[T]) = discard
+  {.pop.}
 
 proc new_model*[T](program: Program,
                    params: Table[TensorId, Tensor[T]],
@@ -66,7 +163,9 @@ proc new_model*[T](program: Program,
     shape_len: builtin_shape_len[T],
     debug_index: builtin_debug_index[T],
     debug_scalar: builtin_debug_scalar[T],
-    epoch: builtin_epoch[T]
+    epoch: builtin_epoch[T],
+    run_threads: builtin_run_threads[T],
+    join_threads: builtin_join_threads[T]
   )
   result = Model[T](
     program: program,
@@ -129,6 +228,7 @@ proc compile*[T](graphs: varargs[Fun]): Model[T] =
   program.inline_static_shapes()
   program.lift_shape_instrs()
   program.unfold_loop_bounds()
+  program.inline_loops()
   program.infer_types()
   result = new_model[T](program)
 

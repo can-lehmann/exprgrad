@@ -45,7 +45,9 @@ type
       of FunCond:
         cond: Table[string, Fun]
         cond_else: Fun
-      of FunBackwards, FunGradient, FunMultiple, FunTarget:
+      of FunTarget:
+        compile_target: CompileTarget
+      of FunBackwards, FunGradient, FunMultiple:
         discard
 
 proc alloc_tensors(fun: Fun, program: Program) =
@@ -183,7 +185,11 @@ proc to_program*(graphs: openArray[Fun]): Program =
     fun.alloc_tensors(result)
     fun.collect_targets(targets)
   for name, fun in targets:
-    var target = Target(name: name, output: fun.tensor)
+    var target = Target(
+      name: name,
+      output: fun.tensor,
+      compile_target: fun.compile_target
+    )
     fun.flatten(target)
     result.targets[name] = target
 
@@ -640,10 +646,11 @@ proc cache*(cache: Fun, name: string = ""): Fun =
   )
 
 proc target*(fun: Fun, name: string): Fun =
-  result = Fun(kind: FunTarget,
-    name: name,
-    children: @[fun]
-  )
+  result = Fun(kind: FunTarget, name: name, children: @[fun])
+  when TARGET_SUPPORTS_THREADS:
+    result.compile_target = CompileThreads
+  else:
+    result.compile_target = CompileCpu
 
 proc cond*(branches: openArray[(string, Fun)],
            otherwise: Fun = nil): Fun =

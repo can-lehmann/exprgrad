@@ -324,13 +324,13 @@ macro serializable*(args: typed): untyped =
 
 serializable([KernelId, RegId, TensorId, LoopId])
 serializable([TypeKind, Type])
-serializable([InstrKind, Instr])
+serializable([LoopMode, InstrKind, Instr])
 serializable([Register, Expr, LinearIndex])
-serializable([LoopMode, Loop])
+serializable([Loop])
 serializable([TensorOpKind, TensorOp])
 serializable([ShapeConstrKind, ShapeConstraint])
 serializable([GenKind, Generator])
-serializable([Kernel, Target])
+serializable([Kernel, CompileTarget, Target])
 serializable([TensorKind, TensorDef])
 serializable([ScalarType, Stage, Program])
 

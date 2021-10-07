@@ -26,6 +26,8 @@ type
   StageError* = ref object of CompilerError
   ShapeError* = ref object of CompilerError
 
+const TARGET_SUPPORTS_THREADS* = compile_option("threads")
+
 type
   KernelId* = distinct int
   RegId* = distinct int
@@ -47,7 +49,8 @@ type
     InstrToScalar, InstrToIndex,
     InstrShape, InstrLen, InstrShapeLen,
     InstrRead, InstrWrite,
-    InstrExtern, InstrEpoch
+    InstrExtern, InstrEpoch,
+    InstrLoop, InstrThreads
   
   Instr* = object
     args*: seq[RegId]
@@ -59,6 +62,9 @@ type
       of InstrBoolean: boolean_lit*: bool
       of InstrExtern: extern*: string
       of InstrShape: dim*: int
+      of InstrLoop, InstrThreads:
+        loop_iter*: RegId
+        loop_body*: seq[Instr]
       else: discard
   
   Register* = object
@@ -122,12 +128,15 @@ type
     expr*: Expr
     write*: TensorOp
   
+  CompileTarget* = enum CompileCpu, CompileThreads
+  
   Target* = object
     name*: string
     output*: TensorId
     tensors*: HashSet[TensorId]
     shapes*: seq[ShapeConstraint]
     kernels*: seq[Kernel]
+    compile_target*: CompileTarget
   
   TensorKind* = enum
     TensorResult, TensorInput, TensorParam, TensorCache, TensorRandom
@@ -155,7 +164,8 @@ type
     StageTensorInstrs, # Tensor access operators are converted to instructions
     StageSortedShapes, # Shape constraint order is known. This stage should only be used in addition to StageConstraints, not insted of it.
     StageStaticShapes, # All static shapes are inferred
-    StageIndependent # All independent loops are identified
+    StageIndependent, # All independent loops are identified
+    StageLoops # All loops are inlined
   
   Program* = ref object
     tensors*: seq[TensorDef]
@@ -167,7 +177,7 @@ type
     scalar_type*: ScalarType
 
 const
-  SIDE_EFFECT_INSTRS* = {InstrWrite}
+  SIDE_EFFECT_INSTRS* = {InstrWrite, InstrLoop, InstrThreads}
 
 proc `<`*(a, b: LoopMode): bool = ord(a) < ord(b)
 proc `<=`*(a, b: LoopMode): bool = ord(a) <= ord(b)
