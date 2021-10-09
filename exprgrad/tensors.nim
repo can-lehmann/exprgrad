@@ -304,8 +304,8 @@ proc concat_last*[T](a, b: Tensor[T]): Tensor[T] =
     )
   for it in 0..<b.shape[^1]:
     copy_mem(
-      result.data[it * stride + a.shape[^1]].addr,
-      a.data[it * stride].addr,
+      result.data[(it + a.shape[^1]) * stride].addr,
+      b.data[it * stride].addr,
       stride * sizeof(T)
     )
 

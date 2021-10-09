@@ -60,3 +60,36 @@ test "transpose":
   check a.transpose().transpose() == a
   check b.transpose().transpose() == b
   check c.transpose().transpose() == c
+
+test "view_last":
+  check b.view_last(0..0) == new_tensor([2, 1], @[1, 2])
+  check b.view_last(1..2) == new_tensor([2, 2], @[3, 4, 5, 6])
+  check b.view_last(0..0) != b.view_last(1..1)
+  check a.view_last(0..0) == new_tensor([3, 1], @[1, 2, 3])
+
+test "select_samples":
+  check b.select_samples([0, 1, 2]) == b
+  check b.select_samples([1]) == new_tensor([2, 1], @[3, 4])
+  check b.select_samples([1, 0]) == new_tensor([2, 2], @[3, 4, 1, 2])
+  check a.select_samples([1]) == new_tensor([3, 1], @[4, 5, 6])
+
+  check b.select_samples([1, 2]) == b.view_last(1..2)
+  check b.select_samples([2, 1]) != b.view_last(1..2)
+
+test "concat_last":
+  check concat_last(
+    new_tensor([1], @[1]),
+    new_tensor([1], @[2])
+  ) == new_tensor([2], @[1, 2])
+  check concat_last(
+    new_tensor([2, 1], @[1, 2]),
+    new_tensor([2, 2], @[3, 4, 5, 6])
+  ) == new_tensor([2, 3], @[1, 2, 3, 4, 5, 6])
+
+test "reshape":
+  check b.reshape([3, 2]) == a
+  check b.reshape([-1, 2]) == a
+  check b.reshape([3, -1]) == a
+  check a.reshape([3, -1]) == a
+  check a.reshape([-1]) == b.reshape([-1])
+
