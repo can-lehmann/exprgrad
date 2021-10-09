@@ -56,21 +56,19 @@ type
     args*: seq[RegId]
     res*: RegId
     tensor*: TensorId
+    body*: seq[Instr]
     case kind*: InstrKind:
       of InstrIndex: index_lit*: int
       of InstrScalar: scalar_lit*: float64
       of InstrBoolean: boolean_lit*: bool
       of InstrExtern: extern*: string
       of InstrShape: dim*: int
-      of InstrLoop:
-        loop_iter*: RegId
-        loop_body*: seq[Instr]
+      of InstrLoop: loop_iter*: RegId
       of InstrThreads:
         threads_closure*: seq[RegId]
         threads_tensors*: seq[TensorId]
         threads_begin*: RegId
         threads_end*: RegId
-        threads_body*: seq[Instr]
       else: discard
   
   Register* = object

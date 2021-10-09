@@ -273,7 +273,7 @@ proc to_llvm(instrs: seq[Instr], ctx: Context) =
           )
         discard builder.build_cond_br(cond, end_block, body_block)
         builder.position_builder_at_end(body_block)
-        instr.loop_body.to_llvm(ctx)
+        instr.body.to_llvm(ctx)
         discard builder.build_br(incr_block)
         
         builder.position_builder_at_end(incr_block)
@@ -351,7 +351,7 @@ proc to_llvm(instrs: seq[Instr], ctx: Context) =
         ], cstring(""))
         
         builder.position_builder_at_end(entry)
-        instr.threads_body.to_llvm(task_ctx)
+        instr.body.to_llvm(task_ctx)
         discard builder.build_ret()
         
         builder.position_builder_at_end(current_block)
