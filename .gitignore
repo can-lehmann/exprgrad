@@ -6,7 +6,6 @@ examples/matmul/matmul
 examples/fashion_mnist/data/
 examples/fashion_mnist/fashion_mnist
 examples/fashion_mnist/model.*
-examples/gan/
 examples/gan/data/
 examples/gan/gan
 examples/gan/model.*

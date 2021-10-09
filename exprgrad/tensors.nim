@@ -280,6 +280,12 @@ proc select_samples*[T](tensor: Tensor[T], idx: openArray[int]): Tensor[T] =
       stride * sizeof(T)
     )
 
+proc select_random_samples*[T](tensor: Tensor[T], count: int): Tensor[T] =
+  var idx = new_seq[int](count)
+  for id in idx.mitems:
+    id = rand(0..<tensor.shape[^1])
+  result = tensor.select_samples(idx)
+
 proc shuffle_xy*[T](x, y: Tensor[T]): tuple[x, y: Tensor[T]] =
   assert x.shape[^1] == y.shape[^1]
   var idx = new_seq[int](x.shape[^1])
