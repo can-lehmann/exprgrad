@@ -59,6 +59,12 @@ proc to_c(typ: Type, ctx: Context): string =
     of TypeIndex: result = nim_int_to_c()
     of TypeScalar: result = ctx.program.scalar_type.to_c()
 
+template with_indent(ctx: Context, body: untyped): untyped =
+  block:
+    ctx.indent += 1
+    defer: ctx.indent -= 1
+    body
+
 proc to_c(instrs: seq[Instr], ctx: Context): string =
   for instr in instrs:
     var expr = ""
@@ -115,7 +121,18 @@ proc to_c(instrs: seq[Instr], ctx: Context): string =
           index = ctx.regs[instr.args[0]]
           value = ctx.regs[instr.args[1]]
         expr = $instr.tensor & "[" & index & "] += " & value
-      of InstrLog, InstrExtern, InstrLoop, InstrThreads:
+      of InstrLoop:
+        let
+          body = ctx.with_indent(instr.body.to_c(ctx))
+          iter = ctx.regs[instr.loop_iter]
+        result = make_indent(ctx.indent)
+        result &= "for(" & nim_int_to_c() & " " & iter & " = "
+        result &= ctx.regs[instr.args[0]] & "; "
+        result &= iter & " < " & ctx.regs[instr.args[1]] & "; "
+        result &= "++" & iter
+        result &= ") {\n" & body & "\n" & make_indent(ctx.indent) & "}"
+        return
+      of InstrLog, InstrExtern, InstrThreads:
         raise GeneratorError(msg: "Unable to generate c source for " & $instr.kind)
     
     var stmt = ""
@@ -132,45 +149,18 @@ proc to_c(instrs: seq[Instr], ctx: Context): string =
       result &= "\n"
     result &= make_indent(ctx.indent) & stmt & ";"
 
-proc to_c(loop: Loop, body: string, ctx: Context): string =
-  let iter = ctx.regs[loop.iter]
-  result = loop.start.setup.to_c(ctx)
-  if result.len > 0:
-    result.add('\n')
-  result &= loop.stop.setup.to_c(ctx)
-  if result.len > 0:
-    result.add('\n')
-  result &= make_indent(ctx.indent)
-  result &= "for(" & nim_int_to_c() & " " & iter & " = "
-  result &= ctx.regs[loop.start.setup[^1].res] & "; "
-  result &= iter & " < " & ctx.regs[loop.stop.setup[^1].res] & "; "
-  result &= "++" & iter
-  result &= ") {\n" & body & "\n" & make_indent(ctx.indent) & "}"
-
 proc inline_registers(instrs: seq[Instr], usages: var seq[int]) =
   for instr in instrs:
     for arg in instr.args:
-      usages[arg] += 1
-
-proc inline_registers(expr: Expr, usages: var seq[int]) =
-  expr.instrs.inline_registers(usages)
-  if expr.res != RegId(0):
-    usages[expr.res] += 1
-
-proc inline_registers(index: LinearIndex, usages: var seq[int]) =
-  index.setup.inline_registers(usages)
-  usages[index.setup[^1].res] += 1
-
-proc inline_registers(loop: Loop, usages: var seq[int]) =
-  loop.start.inline_registers(usages)
-  loop.stop.inline_registers(usages)
-  usages[loop.iter] += 2
-
-template with_indent(ctx: Context, body: untyped) =
-  block:
-    ctx.indent += 1
-    defer: ctx.indent -= 1
-    body
+      if usages[arg] != -1:
+        usages[arg] += 1
+    if instr.body.len > 0:
+      instr.body.inline_registers(usages)
+    case instr.kind:
+      of InstrLoop: usages[instr.loop_iter] += 2
+      of InstrIndex, InstrScalar, InstrBoolean:
+        usages[instr.res] = -1
+      else: discard
 
 proc to_c(kernel: Kernel, ctx: Context): string =
   ctx.with_indent:
@@ -179,9 +169,7 @@ proc to_c(kernel: Kernel, ctx: Context): string =
     ctx.indent += kernel.loops.len
     
     var usages = new_seq[int](kernel.regs.len)
-    for loop in kernel.loops:
-      loop.inline_registers(usages)
-    kernel.expr.inline_registers(usages)
+    kernel.setup.inline_registers(usages)
     
     for it, usage_count in usages:
       if usage_count > 1:
@@ -189,14 +177,16 @@ proc to_c(kernel: Kernel, ctx: Context): string =
         if kernel.regs[it].name.len > 0:
           ctx.regs[it] &= "_" & kernel.regs[it].name
     
-    result = kernel.expr.instrs.to_c(ctx)
-    for it in countdown(kernel.loops.len - 1, 0):
-      ctx.indent -= 1
-      result = kernel.loops[it].to_c(result, ctx)
+    result = kernel.setup.to_c(ctx)
   result = make_indent(ctx.indent) & "{\n" & result
   result &= "\n" & make_indent(ctx.indent) & "}"
 
 proc to_c*(program: Program): string =
+  program.assert_gen("c", requires={
+    StageTyped, StageGenerated, StageTensors, StageShapes,
+    StageLoops, StageTensorInstrs, StageSortedShapes
+  })
+  
   let ctx = Context(program: program)
   
   block builtins:
