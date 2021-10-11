@@ -79,7 +79,7 @@ proc infer_types(instrs: seq[Instr], regs: var seq[Register]) =
       of InstrEpoch: ret_type = Type(kind: TypeIndex, count: 1)
       of InstrLoop:
         if arg_type(0).kind != TypeIndex or arg_type(1).kind != TypeIndex:
-          raise TypeError(msg: "Loop bounds must be of type Index")
+          raise TypeError(msg: "Loop bounds must be of type Index, but are currently of types " & $arg_type(0) & " and " & $arg_type(1))
         regs[instr.loop_iter].typ = Type(kind: TypeIndex, count: 1)
         instr.body.infer_types(regs)
       of InstrThreads:
@@ -1285,95 +1285,6 @@ proc identify_independent*(program: Program) =
     for kernel in target.kernels:
       kernel.identify_independent()
 
-proc is_reduce(kernel: Kernel): bool =
-  for loop in kernel.loops:
-    if loop.mode <= LoopNone:
-      return true
-
-proc can_fuse(a, b: Kernel): bool =
-  if not a.is_reduce():
-    for read in b.reads:
-      if read.tensor == a.write.tensor:
-        if read.is_raw:
-          return false
-    return true
-
-proc is_map(kernel: Kernel): bool =
-  result = not kernel.is_reduce() and kernel.reads.len == 1
-
-proc should_fuse(a, b: Kernel): bool =
-  result = can_fuse(a, b) and b.is_map()
-
-proc fuse_loops(a, b: Kernel): Kernel =
-  assert can_fuse(a, b)
-  result = b.clone()
-  result.reads = @[]
-  for read in b.reads:
-    if read.tensor == a.write.tensor:
-      assert not read.is_raw
-      var subs = init_table[RegId, RegId]()
-      for dim, index in read.dims:
-        subs[a.write.dims[dim].only_register] = index.only_register
-      subs[a.write.data] = read.data
-      for it, register in a.regs:
-        let reg = RegId(it + 1)
-        if reg notin subs:
-          subs[reg] = result.regs.alloc(register)
-      var
-        instrs = a.expr.instrs
-        setup = a.setup
-      instrs.substitute(subs)
-      setup.substitute(subs)
-      result.expr.instrs = instrs & result.expr.instrs
-      result.setup = setup & result.setup
-      for op in a.reads:
-        var new_read = op
-        new_read.substitute(subs)
-        result.reads.add(new_read)
-      result.deduplicate_reads()
-    else:
-      result.reads.add(read)
-
-proc fuse_loops*(program: Program) =
-  program.assert_pass("fuse_loops",
-    produces={},
-    requires={StageIndependent},
-    preserves={
-      StageShapes, StageSortedShapes, StageFolded, StageIndependent,
-      StageBounds, StageTensors, StageGenerated
-    }
-  )
-  
-  for name, target in program.targets.mpairs:
-    var usage_counts = new_seq[int](program.tensors.len)
-    for kernel in target.kernels:
-      for read in kernel.reads:
-        usage_counts[read.tensor] += 1
-  
-    var
-      producers = new_seq[KernelId](program.tensors.len)
-      multiple = init_hash_set[TensorId]()
-    
-    for it, initial_kernel in target.kernels:
-      var kernel = initial_kernel
-      for read in initial_kernel.reads:
-        if usage_counts[read.tensor] == 1 and
-           producers[read.tensor] != KernelId(0):
-          let producer = target.kernels[producers[read.tensor]]
-          if should_fuse(producer, kernel):
-            echo "Fuse!"
-            kernel = fuse_loops(producer, kernel)
-      
-      let id = KernelId(it + 1)
-      if producers[kernel.write.tensor] != KernelId(0) or
-         kernel.write.tensor in multiple:
-        producers[kernel.write.tensor] = KernelId(0)
-        multiple.incl(kernel.write.tensor)
-      else:
-        producers[kernel.write.tensor] = id
-      
-      target.kernels[it] = kernel
-
 proc choose_parallel*(program: Program) =
   program.assert_pass("choose_parallel",
     requires={StageIndependent},
@@ -1395,6 +1306,182 @@ proc choose_parallel*(program: Program) =
           if count <= 0:
             break
 
+type
+  BoundsMode = enum BoundsNone, BoundsDim, BoundsLen
+  BoundsInfo = object
+    mode: BoundsMode
+    tensor: TensorId
+    dim: int
+
+proc bounds_info(loop: Loop): BoundsInfo =
+  if loop.start.factors.len == 0 and
+     loop.start.constant == 0 and
+     loop.stop.only_register != RegId(0) and
+     loop.stop.setup.len > 0 and
+     loop.stop.only_register == loop.stop.setup[^1].res:
+    result.tensor = loop.stop.setup[^1].tensor
+    case loop.stop.setup[^1].kind:
+      of InstrShape:
+        result.mode = BoundsDim
+        result.dim = loop.stop.setup[^1].dim
+      of InstrLen:
+        result.mode = BoundsLen
+      else: discard
+
+type
+  TokenId = distinct int
+  ShapeTokens = seq[seq[TokenId]]
+
+proc `==`(a, b: TokenId): bool {.borrow.}
+proc `$`(token: TokenId): string =
+  if token == TokenId(0):
+    result = "no_token"
+  else:
+    result = "token" & $(int(token) - 1)
+
+proc alloc(tokens: var TokenId): TokenId =
+  tokens = TokenId(int(tokens) + 1)
+  result = tokens
+
+proc build_shape_tokens(program: Program): ShapeTokens =
+  program.assert_analysis("build_shape_tokens", requires={
+    StageSortedShapes, StageStaticShapes, StageFolded
+  })
+  
+  result = new_seq[seq[TokenId]](program.tensors.len)
+  var
+    tokens = TokenId(0)
+    value_tokens = init_table[int, TokenId]()
+  for it, tensor in program.tensors:
+    result[it] = new_seq[TokenId](tensor.shape.len)
+    for dim, size in tensor.shape:
+      if size != -1:
+        if size notin value_tokens:
+          value_tokens[size] = tokens.alloc()
+        result[it][dim] = value_tokens[size]
+  
+  for name, target in program.targets:
+    for shape in target.shapes:
+      case shape.kind:
+        of ShapeNone: discard
+        of ShapeDims:
+          if result[shape.dest].len == 0:
+            result[shape.dest] = new_seq[TokenId](shape.dims.len)
+          for dim, size in shape.dims:
+            if result[shape.dest][dim] == TokenId(0):
+              if size.only_register != RegId(0) and
+                 size.setup.len > 0 and
+                 size.setup[^1].res == size.only_register and
+                 size.setup[^1].kind == InstrShape:
+                let instr = size.setup[^1]
+                result[shape.dest][dim] = result[instr.tensor][instr.dim]
+              else:
+                result[shape.dest][dim] = tokens.alloc()
+        of ShapeLinear:
+          var regs = init_table[RegId, TokenId]()
+          for tensor, dims in shape.reads:
+            for dim, size in dims:
+              assert size.len == 1
+              if size[0].only_register != RegId(0):
+                regs[size[0].only_register] = result[tensor][dim]
+          if result[shape.dest].len == 0:
+            result[shape.dest] = new_seq[TokenId](shape.write.len)
+          for dim, size in shape.write:
+            if result[shape.dest][dim] == TokenId(0):
+              if size.only_register in regs:
+                result[shape.dest][dim] = regs[size.only_register]
+              else:
+                result[shape.dest][dim] = tokens.alloc()
+        of ShapeCopy:
+          result[shape.dest] = result[shape.src]
+
+proc same_range(tokens: ShapeTokens, a, b: BoundsInfo): bool =
+  if a.mode == b.mode:
+    case a.mode:
+      of BoundsNone: result = false
+      of BoundsDim:
+        result = tokens[a.tensor][a.dim] == tokens[b.tensor][b.dim]
+      of BoundsLen:
+        result = tokens[a.tensor] == tokens[b.tensor]
+
+proc is_elementwise_map(kernel: Kernel): bool =
+  if kernel.loops.len == 1:
+    let
+      iter = kernel.loops[0].iter
+      info = kernel.loops[0].bounds_info
+    result = kernel.reads.len == 1 and kernel.reads[0].is_raw and
+             kernel.reads[0].dims[0].only_register == iter and
+             kernel.write.is_raw and
+             kernel.write.dims[0].only_register == iter and
+             info.mode == BoundsLen and
+             (info.tensor == kernel.reads[0].tensor or
+              info.tensor == kernel.write.tensor)
+
+proc nest_elementwise_map(kernel: Kernel, tensors: seq[TensorDef]) =
+  kernel.loops = @[]
+  kernel.reads[0].is_raw = false
+  kernel.write.is_raw = false
+  
+  let tensor_id = kernel.reads[0].tensor
+  var iters: seq[LinearIndex] = @[]
+  for dim, size in tensors[tensor_id].shape:
+    let iter = kernel.regs.alloc()
+    iters.add(LinearIndex(factors: to_table({iter: 1})))
+    kernel.loops.add(Loop(iter: iter, has_bounds: true))
+    kernel.loops[^1].use_bounds(kernel.reads[0], dim, kernel.regs)
+  kernel.loops.reverse()
+  kernel.reads[0].dims = iters
+  kernel.write.dims = iters
+
+proc fuse_loops*(program: Program) =
+  program.assert_pass("fuse_loops",
+    requires={StageBounds, StageIndependent, StageStaticShapes},
+    produces={},
+    preserves={
+      StageGenerated, StageTensors, StageShapes,
+      StageSortedShapes, StageTensorInstrs, StageFolded,
+      StageStaticShapes, StageBounds
+    }
+  )
+  
+  let shape_tokens = program.build_shape_tokens()
+  for name, target in program.targets:
+    for kernel_it in 1..<target.kernels.len:
+      let
+        a = target.kernels[kernel_it - 1]
+        b = target.kernels[kernel_it]
+      
+      if b.is_elementwise_map() and
+         a.write.tensor == b.reads[0].tensor and
+         a.loops.len > 0 and
+         a.loops[0].bounds_info.mode == BoundsDim and
+         a.loops[0].mode >= LoopIndependent and
+         shape_tokens[b.reads[0].tensor] == shape_tokens[b.write.tensor]:
+        b.nest_elementwise_map(program.tensors)
+      
+      if not a.write.is_raw and
+         not b.reads.any_it(it.tensor == a.write.tensor and it.is_raw):
+        for it in 0..<min(a.loops.len, b.loops.len):
+          let
+            a_loop = a.loops[it]
+            b_loop = b.loops[it]
+          if not shape_tokens.same_range(a_loop.bounds_info, b_loop.bounds_info):
+            break
+          var dim = -1
+          for dim_it, index in a.write.dims:
+            if index.only_register == a_loop.iter:
+              dim = dim_it
+              break
+          if dim == -1:
+            break
+          let has_dependent_read = b.reads.any_it(
+            it.tensor == a.write.tensor and
+            it.dims[dim].only_register != b_loop.iter
+          )
+          if has_dependent_read:
+            break
+          a.loops[it].fuse_next = true
+
 proc collect_used(instrs: seq[Instr]): HashSet[RegId] =
   for instr in instrs:
     for arg in instr.args:
@@ -1409,46 +1496,67 @@ proc collect_defined(instrs: seq[Instr]): HashSet[RegId] =
     if instr.body.len > 0: 
       result = result.union(instr.body.collect_defined())
 
-proc inline_loops(kernel: Kernel) =
-  var body = kernel.expr.instrs
-  for it in countdown(kernel.loops.len - 1, 0):
-    let loop = kernel.loops[it]
-    kernel.setup.add(loop.start.setup)
-    kernel.setup.add(loop.stop.setup)
-    if loop.mode >= LoopParallel:
-      var closure: seq[RegId] = @[]
-      let
-        used = body.collect_used()
-        defined = kernel.setup.collect_defined()
-      for reg in used:
-        if reg in defined:
-          closure.add(reg)
-      
-      var tensors: seq[TensorId] = @[]
-      for tensor in body.collect_tensors():
-        tensors.add(tensor)
-      
-      let (range_begin, range_end) = (kernel.regs.alloc(), kernel.regs.alloc())
-      body = @[Instr(kind: InstrThreads,
-        args: @[loop.start.setup[^1].res, loop.stop.setup[^1].res],
-        threads_begin: range_begin, threads_end: range_end,
-        threads_closure: closure,
-        threads_tensors: tensors,
-        body: @[Instr(kind: InstrLoop,
-          args: @[range_begin, range_end],
-          loop_iter: loop.iter,
-          body: body
-        )]
-      )]
-    else:
-      body = @[Instr(kind: InstrLoop,
-        args: @[loop.start.setup[^1].res, loop.stop.setup[^1].res],
+proc inline_loop(kernel: Kernel) =
+  let loop = kernel.loops.pop()
+  kernel.setup.add(loop.start.setup)
+  kernel.setup.add(loop.stop.setup)
+  if loop.mode >= LoopParallel:
+    var closure: seq[RegId] = @[]
+    let
+      used = kernel.expr.instrs.collect_used()
+      defined = kernel.setup.collect_defined()
+    for reg in used:
+      if reg in defined:
+        closure.add(reg)
+    
+    var tensors: seq[TensorId] = @[]
+    for tensor in kernel.expr.instrs.collect_tensors():
+      tensors.add(tensor)
+    
+    let (range_begin, range_end) = (kernel.regs.alloc(), kernel.regs.alloc())
+    kernel.expr.instrs = @[Instr(kind: InstrThreads,
+      args: @[loop.start.setup[^1].res, loop.stop.setup[^1].res],
+      threads_begin: range_begin, threads_end: range_end,
+      threads_closure: closure,
+      threads_tensors: tensors,
+      body: @[Instr(kind: InstrLoop,
+        args: @[range_begin, range_end],
         loop_iter: loop.iter,
-        body: body
+        body: kernel.expr.instrs
       )]
-  kernel.setup.add(body)
-  kernel.loops = @[]
-  kernel.expr = Expr()
+    )]
+  else:
+    kernel.expr.instrs = @[Instr(kind: InstrLoop,
+      args: @[loop.start.setup[^1].res, loop.stop.setup[^1].res],
+      loop_iter: loop.iter,
+      loop_fuse_next: loop.fuse_next,
+      body: kernel.expr.instrs
+    )]
+
+proc inline_loops(kernels: var seq[Kernel], cur, until_level: int) =
+  let kernel = kernels[cur]
+  while kernel.loops.len > until_level:
+    while kernel.loops[^1].fuse_next:
+      kernels.inline_loops(cur + 1, kernel.loops.len)
+      let next_kernel = kernels[cur + 1]
+      var
+        instrs = next_kernel.expr.instrs
+        setup = next_kernel.setup
+        subs = init_table[RegId, RegId]()
+      for it in 0..<kernel.loops.len:
+        subs[next_kernel.loops[it].iter] = kernel.loops[it].iter
+      for it in 0..<next_kernel.regs.len:
+        let reg = RegId(it + 1)
+        if reg notin subs:
+          subs[reg] = kernel.regs.alloc(next_kernel.regs[it])
+      instrs.substitute(subs)
+      setup.substitute(subs)
+      kernel.expr.instrs.add(instrs)
+      kernel.setup.add(setup)
+      for it in 0..<kernel.loops.len:
+        kernel.loops[it].fuse_next = next_kernel.loops[it].fuse_next
+      kernels.delete(cur + 1)
+    kernel.inline_loop()
 
 proc inline_loops*(program: Program) =
   program.assert_pass("inline_loops",
@@ -1460,6 +1568,12 @@ proc inline_loops*(program: Program) =
     }
   )
   
-  for name, target in program.targets:
+  for name, target in program.targets.mpairs:
+    var it = 0
+    while it < target.kernels.len:
+      target.kernels.inline_loops(it, 0)
+      it += 1
+    
     for kernel in target.kernels:
-      kernel.inline_loops()
+      kernel.setup.add(kernel.expr.instrs)
+      kernel.expr = Expr()

@@ -121,17 +121,21 @@ proc to_c(instrs: seq[Instr], ctx: Context): string =
           index = ctx.regs[instr.args[0]]
           value = ctx.regs[instr.args[1]]
         expr = $instr.tensor & "[" & index & "] += " & value
+        expr &= "/* " & $instr.tensor & " " & $ctx.program.tensors[instr.tensor].shape & " */"
       of InstrLoop:
         let
           body = ctx.with_indent(instr.body.to_c(ctx))
           iter = ctx.regs[instr.loop_iter]
-        result = make_indent(ctx.indent)
+        if result.len > 0:
+          result &= "\n"
+        result &= make_indent(ctx.indent)
         result &= "for(" & nim_int_to_c() & " " & iter & " = "
         result &= ctx.regs[instr.args[0]] & "; "
         result &= iter & " < " & ctx.regs[instr.args[1]] & "; "
         result &= "++" & iter
         result &= ") {\n" & body & "\n" & make_indent(ctx.indent) & "}"
-        return
+        result &= " // " & $instr.loop_fuse_next
+        continue
       of InstrLog, InstrExtern, InstrThreads:
         raise GeneratorError(msg: "Unable to generate c source for " & $instr.kind)
     

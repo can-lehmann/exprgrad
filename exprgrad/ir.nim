@@ -63,7 +63,9 @@ type
       of InstrBoolean: boolean_lit*: bool
       of InstrExtern: extern*: string
       of InstrShape: dim*: int
-      of InstrLoop: loop_iter*: RegId
+      of InstrLoop:
+        loop_iter*: RegId
+        loop_fuse_next*: bool
       of InstrThreads:
         threads_closure*: seq[RegId]
         threads_tensors*: seq[TensorId]
@@ -92,6 +94,7 @@ type
     has_bounds*: bool
     start*: LinearIndex
     stop*: LinearIndex
+    fuse_next*: bool
   
   TensorOpKind* = enum OpRead, OpWrite
   TensorOp* = object
@@ -257,6 +260,15 @@ proc substitute*(instrs: var seq[Instr], subs: Table[RegId, RegId]) =
     for arg in instr.args.mitems:
       sub(arg)
     sub(instr.res)
+    if instr.body.len > 0:
+      instr.body.substitute(subs)
+    
+    case instr.kind:
+      of InstrLoop: sub(instr.loop_iter)
+      of InstrThreads:
+        sub(instr.threads_begin)
+        sub(instr.threads_end)
+      else: discard
 
 proc substitute*(expr: var Expr, subs: Table[RegId, RegId]) =  
   expr.instrs.substitute(subs)
@@ -386,6 +398,14 @@ proc assert_gen*(program: Program,
   for stage in requires:
     if stage notin program.stages:
       raise StageError(msg: "Generator " & name & " requires stage " & $stage & ", but only stages " & $program.stages & " are available.")
+
+proc assert_analysis*(program: Program,
+                      name: string,
+                      requires: set[Stage] = {}) =
+  for stage in requires:
+    if stage notin program.stages:
+      raise StageError(msg: "Analysis " & name & " requires stage " & $stage & ", but only stages " & $program.stages & " are available.")
+
 
 # LinearIndex arithmetic
 
