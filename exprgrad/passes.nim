@@ -1374,12 +1374,16 @@ proc build_shape_tokens(program: Program): ShapeTokens =
                  size.setup[^1].res == size.only_register and
                  size.setup[^1].kind == InstrShape:
                 let instr = size.setup[^1]
+                while result[instr.tensor].len <= instr.dim:
+                  result[instr.tensor].add(tokens.alloc())
                 result[shape.dest][dim] = result[instr.tensor][instr.dim]
               else:
                 result[shape.dest][dim] = tokens.alloc()
         of ShapeLinear:
           var regs = init_table[RegId, TokenId]()
           for tensor, dims in shape.reads:
+            while result[tensor].len < dims.len:
+              result[tensor].add(tokens.alloc())
             for dim, size in dims:
               assert size.len == 1
               if size[0].only_register != RegId(0):
