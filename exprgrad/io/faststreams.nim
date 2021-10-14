@@ -60,6 +60,13 @@ proc at_end*(stream: ReadStream): bool = stream.left <= 0
 proc skip*(stream: var ReadStream, count: int) =
   for it in 0..<count:
     discard stream.read_char()
+
+proc skip*(stream: var ReadStream, chars: set[char]) =
+  while stream.peek_char() in chars:
+    discard stream.read_char()
+
+proc skip_whitespace*(stream: var ReadStream) =
+  stream.skip({' ', '\n', '\t', '\r'})
 {.pop.}
 
 type WriteStream* = object
