@@ -10,9 +10,13 @@ randomize(10)
 
 let
   net = input("x")
-    .dense(2, 4).leaky_relu().dense(4, 1).sigmoid().target("predict")
-    .mse(input("y")).target("loss")
-    .backprop(gradient_descent.make_opt(rate=0.1)).target("train")
+    .dense(2, 4).leaky_relu() # 1st Layer
+    .dense(4, 1).sigmoid()    # 2nd Layer
+    .target("predict")
+    .mse(input("y"))          # Loss
+    .target("loss")
+    .backprop(gradient_descent.make_opt(rate=0.1)) # Train
+    .target("train")
   model = compile[float32](net)
 
 let
@@ -29,9 +33,11 @@ Because exprgrad is based on a custom differentiable programming language, we do
 Instead we can also specify the same model in terms of scalar operations on tensors.
 
 ```nim
+# Layer 1
 hidden*[x, y] ++= input("x")[it, y] * param([4, 2])[x, it]
 hidden[x, y] ++= param([4])[x]
 hidden_relu*{it} ++= select(hidden{it} <= 0.0, 0.1 * hidden{it}, hidden{it})
+# Layer 2
 output*[x, y] ++= hidden_relu[it, y] * param([1, 4])[x, it]
 output[x, y] ++= param([1])[x]
 output_sigmoid*{it} ++= 1.0 / (1.0 + exp(-output{it})) 
@@ -39,8 +45,8 @@ let pred = output_sigmoid.target("predict")
 
 proc optim(param: var Fun, grad: Fun) =
   param{it} ++= -0.1 * grad{it}
-loss*[0] ++= sq(pred{it} - input("y"){it})
-let net = loss.target("loss").backprop(optim).target("train")
+loss*[0] ++= sq(pred{it} - input("y"){it}) # Loss
+let net = loss.target("loss").backprop(optim).target("train") # Train
 ```
 
 Since exprgrad's compiler is able to derive any program written in its domain specific language, we do not need to specify a backwards pass.

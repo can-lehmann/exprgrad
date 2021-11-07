@@ -16,9 +16,11 @@ import std/random
 import exprgrad
 randomize(10)
 
+# Layer 1
 hidden*[x, y] ++= input("x")[it, y] * param([4, 2])[x, it]
 hidden[x, y] ++= param([4])[x]
 hidden_relu*{it} ++= select(hidden{it} <= 0.0, 0.1 * hidden{it}, hidden{it})
+# Layer 2
 output*[x, y] ++= hidden_relu[it, y] * param([1, 4])[x, it]
 output[x, y] ++= param([1])[x]
 output_sigmoid*{it} ++= 1.0 / (1.0 + exp(-output{it})) 
@@ -26,8 +28,8 @@ let pred = output_sigmoid.target("predict")
 
 proc optim(param: var Fun, grad: Fun) =
   param{it} ++= -0.1 * grad{it}
-loss*[0] ++= sq(pred{it} - input("y"){it})
-let net = loss.target("loss").backprop(optim).target("train")
+loss*[0] ++= sq(pred{it} - input("y"){it}) # Loss
+let net = loss.target("loss").backprop(optim).target("train") # Train
 
 let model = compile[float32](net)
 

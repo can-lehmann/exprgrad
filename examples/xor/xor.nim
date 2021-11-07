@@ -18,9 +18,13 @@ randomize(10)
 
 let
   net = input("x")
-    .dense(2, 4).leaky_relu().dense(4, 1).sigmoid().target("predict")
-    .mse(input("y")).target("loss")
-    .backprop(gradient_descent.make_opt(rate=0.1)).target("train")
+    .dense(2, 4).leaky_relu() # 1st Layer
+    .dense(4, 1).sigmoid()    # 2nd Layer
+    .target("predict")
+    .mse(input("y"))          # Loss
+    .target("loss")
+    .backprop(gradient_descent.make_opt(rate=0.1)) # Train
+    .target("train")
   model = compile[float32](net)
 
 let
