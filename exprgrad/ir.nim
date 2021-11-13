@@ -48,7 +48,7 @@ type
     InstrEq, InstrLt, InstrLe, InstrSelect,
     InstrToScalar, InstrToIndex,
     InstrShape, InstrLen, InstrShapeLen,
-    InstrRead, InstrWrite,
+    InstrRead, InstrWrite, InstrOverwrite,
     InstrExtern, InstrEpoch,
     InstrLoop, InstrThreads
   

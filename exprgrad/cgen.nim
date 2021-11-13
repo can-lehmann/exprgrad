@@ -116,11 +116,15 @@ proc to_c(instrs: seq[Instr], ctx: Context): string =
       of InstrRead:
         let index = ctx.regs[instr.args[0]]
         expr = $instr.tensor & "[" & index & "]"
-      of InstrWrite:
+      of InstrWrite, InstrOverwrite:
         let
           index = ctx.regs[instr.args[0]]
           value = ctx.regs[instr.args[1]]
-        expr = $instr.tensor & "[" & index & "] += " & value
+          op = case instr.kind:
+            of InstrWrite: "+="
+            of InstrOverwrite: "="
+            else: ""
+        expr = $instr.tensor & "[" & index & "] " & op & " " & value
         expr &= "/* " & $instr.tensor & " " & $ctx.program.tensors[instr.tensor].shape & " */"
       of InstrLoop:
         let

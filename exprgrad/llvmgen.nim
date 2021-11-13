@@ -218,24 +218,30 @@ proc to_llvm(instrs: seq[Instr], ctx: Context) =
           convert(build_fp_to_si)
         else:
           raise GeneratorError(msg: "Unable to convert " & $from_typ & " to " & $to_typ)
-      of InstrRead, InstrWrite:
+      of InstrRead, InstrWrite, InstrOverwrite:
         let
           align = cuint(4) # TODO
           value_ptr = builder.build_gep2(
             ctx.scalar_type(), ctx[instr.tensor],
             [ctx[instr.args[0]]], "value_ptr"
           )
-          value = builder.build_load2(
-            ctx.scalar_type(), value_ptr, cstring($instr.res)
-          )
-        value_ptr.set_is_in_bounds(1)
-        value.set_alignment(align)
+        
         case instr.kind:
-          of InstrRead: res = value
-          of InstrWrite:
-            builder.build_store(builder.build_fadd(
-              value, ctx[instr.args[1]], "new_value"
-            ), value_ptr).set_alignment(align)
+          of InstrWrite, InstrRead:
+            let value = builder.build_load2(
+              ctx.scalar_type(), value_ptr, cstring($instr.res)
+            )
+            value_ptr.set_is_in_bounds(1)
+            value.set_alignment(align)
+            case instr.kind:
+              of InstrRead: res = value
+              of InstrWrite:
+                builder.build_store(builder.build_fadd(
+                  value, ctx[instr.args[1]], "new_value"
+                ), value_ptr).set_alignment(align)
+              else: discard
+          of InstrOverwrite:
+            builder.build_store(ctx[instr.args[1]], value_ptr).set_alignment(align)
           else: discard
       of InstrLen:
         res = builder.build_call2(ctx.builtin.len_signature(), ctx.builtin.len, [

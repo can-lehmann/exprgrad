@@ -64,7 +64,7 @@ proc infer_types(instrs: seq[Instr], regs: var seq[Register]) =
         ret_type = arg_type(0)
       of InstrShape, InstrLen, InstrShapeLen:
         ret_type = Type(kind: TypeIndex, count: 1)
-      of InstrRead, InstrWrite:
+      of InstrRead, InstrWrite, InstrOverwrite:
         if instr.tensor == TensorId(0):
           raise TypeError(msg: $instr.kind & " must have a tensor argument")
         if arg_type(0).kind != TypeIndex:
@@ -661,8 +661,7 @@ proc expand_tensor_index(dims: seq[LinearIndex],
       sum = new_sum
     result.res = sum
 
-proc inline_tensor_ops(kernel: Kernel) =
-  const ACCESS_INSTR = [OpRead: InstrRead, OpWrite: InstrWrite]
+proc inline_tensor_ops(kernel: Kernel, has_written: var seq[bool]) =
   var instrs = [
     OpRead: new_seq[Instr](),
     OpWrite: new_seq[Instr]()
@@ -684,12 +683,26 @@ proc inline_tensor_ops(kernel: Kernel) =
       of OpRead: res = tensor_op.data
       of OpWrite: args.add(tensor_op.data)
     
-    instrs[kind].add(Instr(kind: ACCESS_INSTR[kind],
+    let instr_kind = case kind:
+      of OpRead: InstrRead
+      of OpWrite:
+        var can_overwrite = not has_written[tensor_op.tensor]
+        for loop in kernel.loops:
+          if loop.mode < LoopIndependent:
+            can_overwrite = false
+            break
+        if can_overwrite:
+          InstrOverwrite
+        else:
+          InstrWrite
+    
+    instrs[kind].add(Instr(kind: instr_kind,
       tensor: tensor_op.tensor,
       args: args,
       res: res
     ))
   
+  has_written[kernel.write.tensor] = true
   kernel.expr.instrs = instrs[OpRead] & kernel.expr.instrs & instrs[OpWrite]
   kernel.expr.res = RegId(0)
   kernel.reads = new_seq[TensorOp]()
@@ -706,9 +719,13 @@ proc inline_tensor_ops*(program: Program) =
     }
   )
 
+  var has_written = new_seq[bool](program.tensors.len)
+  for it, tensor in program.tensors:
+    if tensor.kind != TensorResult:
+      has_written[it] = true
   for name, target in program.targets.mpairs:
     for kernel in target.kernels:
-      kernel.inline_tensor_ops()
+      kernel.inline_tensor_ops(has_written)
 
 proc collect_tensors(instrs: seq[Instr], tensors: var HashSet[TensorId]) =
   for instr in instrs:
