@@ -64,7 +64,7 @@ Exprgrad requires the LLVM C-API in order to be able to compile models.
 LLVM can be installed using `apt install llvm-dev` on Ubuntu or `dnf install llvm-devel` on Fedora.
 
 ```bash
-$ nimble install https://github.com/can-lehmann/exprgrad
+$ nimble install exprgrad
 ```
 
 ## Documentation
