@@ -1,0 +1,30 @@
+name: test
+
+on:
+  push:
+    paths-ignore:
+      - 'LICENSE.*'
+      - 'README.*'
+  pull_request:
+    paths-ignore:
+      - 'LICENSE.*'
+      - 'README.*'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        nim-version:
+          - '1.6.0'
+          - '1.6.x'
+          - 'stable'
+    steps:
+      - uses: actions/checkout@v2
+      - uses: jiro4989/setup-nim-action@v1
+        with:
+          nim-version: ${{ matrix.nim-version }}
+      - run: sudo apt update -y
+      - run: sudo apt install -y llvm-dev
+      - run: nimble install -Y
+      - run: nimble test -Y

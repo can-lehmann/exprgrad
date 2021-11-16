@@ -14,7 +14,12 @@
 
 # A simple unit-testing framework
 
-import std/[terminal, macros, sets]
+import std/[terminal, macros, sets, exitprocs]
+
+var quit_code = QuitSuccess
+add_exit_proc(proc() {.closure.} =
+  quit(quit_code)
+)
 
 type TestError = ref object of CatchableError
   env: seq[(string, string)]
@@ -28,7 +33,7 @@ template test*(name: string, body: untyped) =
   except TestError as err:
     success = false
     env = err.env
-  
+
   if success:
     stdout.set_foreground_color(fgGreen)
     stdout.write("[✓] ")
@@ -36,6 +41,7 @@ template test*(name: string, body: untyped) =
     stdout.write(name)
     stdout.write("\n")
   else:
+    quit_code = QuitFailure
     stdout.write("\n")
     stdout.set_foreground_color(fgRed)
     stdout.write("Test Failed: ")
