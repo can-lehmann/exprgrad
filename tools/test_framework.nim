@@ -16,9 +16,9 @@
 
 import std/[terminal, macros, sets, exitprocs]
 
-var quitCode = QuitSuccess
-addExitProc(proc() {.closure.} =
-  quit(quitCode)
+var quit_code = QuitSuccess
+add_exit_proc(proc() {.closure.} =
+  quit(quit_code)
 )
 
 type TestError = ref object of CatchableError
@@ -41,7 +41,7 @@ template test*(name: string, body: untyped) =
     stdout.write(name)
     stdout.write("\n")
   else:
-    quitCode = QuitFailure
+    quit_code = QuitFailure
     stdout.write("\n")
     stdout.set_foreground_color(fgRed)
     stdout.write("Test Failed: ")
