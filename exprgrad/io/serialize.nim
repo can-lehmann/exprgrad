@@ -199,7 +199,7 @@ proc collect_discriminants(node: NimNode): seq[NimNode] =
 type SerializeKind = enum
   SerializeStore, SerializeLoad
 
-proc gen_serialize(node, stmts, typ: NimNode, kind: SerializeKind) =
+proc gen_serialize(node, decls, stmts, typ: NimNode, kind: SerializeKind) =
   let
     stream = ident("stream")
     value = ident("value")
@@ -207,7 +207,7 @@ proc gen_serialize(node, stmts, typ: NimNode, kind: SerializeKind) =
   case node.kind:
     of nnkTypeDef:
       let body = new_stmt_list()
-      node[2].gen_serialize(body, node[0], kind)
+      node[2].gen_serialize(decls, body, node[0], kind)
       var typ_name = node[0]
       if kind == SerializeLoad:
         typ_name = new_tree(nnkVarTy, typ_name)
@@ -217,6 +217,8 @@ proc gen_serialize(node, stmts, typ: NimNode, kind: SerializeKind) =
       stmts.add: quote:
         proc `kind_name`*(`stream`: var `stream_typ`, `value`: `typ_name`) =
           `body`
+      decls.add: quote:
+        proc `kind_name`*(`stream`: var `stream_typ`, `value`: `typ_name`)
       discard # stmts.add returns a NimNode
     of nnkDistinctTy:
       let base_typ = node[0]
@@ -259,10 +261,10 @@ proc gen_serialize(node, stmts, typ: NimNode, kind: SerializeKind) =
               `kind_name`(`stream`, `load_name`)
             constr.add(new_tree(nnkExprColonExpr, name, load_name))
           stmts.add(new_assignment(value, constr))
-      node[2].gen_serialize(stmts, typ, kind)
+      node[2].gen_serialize(decls, stmts, typ, kind)
     of nnkRecList:
       for defs in node:
-        defs.gen_serialize(stmts, typ, kind)
+        defs.gen_serialize(decls, stmts, typ, kind)
     of nnkIdentDefs:
       let field_typ = node[^2]
       for it in 0..<(node.len - 2):
@@ -276,7 +278,7 @@ proc gen_serialize(node, stmts, typ: NimNode, kind: SerializeKind) =
       )
       for it in 1..<node.len:
         var body = new_stmt_list()
-        node[it][^1].gen_serialize(body, typ, kind)
+        node[it][^1].gen_serialize(decls, body, typ, kind)
         case node[it].kind:
           of nnkOfBranch:
             case_stmt.add(new_tree(nnkOfBranch, node[it][0], body))
@@ -287,7 +289,7 @@ proc gen_serialize(node, stmts, typ: NimNode, kind: SerializeKind) =
     of nnkNilLit: discard
     of nnkRefTy:
       var body = new_stmt_list()
-      node[0].gen_serialize(body, typ, kind)
+      node[0].gen_serialize(decls, body, typ, kind)
       case kind:
         of SerializeStore:
           stmts.add: quote:
@@ -306,21 +308,24 @@ proc gen_serialize(node, stmts, typ: NimNode, kind: SerializeKind) =
       echo node.tree_repr
       raise new_exception(ValueError, "Unable to generate load for " & $node.kind)
 
-proc gen_serialize(node, stmts: NimNode) =
+proc gen_serialize(node, decls, impls: NimNode) =
   case node.kind:
     of nnkSym:
       let impl = node.get_impl()
-      impl.gen_serialize(stmts, nil, SerializeLoad)
-      impl.gen_serialize(stmts, nil, SerializeStore)
+      impl.gen_serialize(decls, impls, nil, SerializeLoad)
+      impl.gen_serialize(decls, impls, nil, SerializeStore)
     of nnkBracket:
       for child in node.children:
-        child.gen_serialize(stmts)
+        child.gen_serialize(decls, impls)
     else:
       raise new_exception(ValueError, "Unable to generate load/store from " & $node.kind)
 
 macro serializable*(args: typed): untyped =
-  result = new_stmt_list()
-  args.gen_serialize(result)
+  var
+    decls = new_stmt_list()
+    impls = new_stmt_list()
+  args.gen_serialize(decls, impls)
+  result = new_stmt_list([decls, impls])
 
 serializable([KernelId, RegId, TensorId, LoopId])
 serializable([TypeKind, Type])
@@ -330,7 +335,7 @@ serializable([Loop])
 serializable([TensorOpKind, TensorOp])
 serializable([ShapeConstrKind, ShapeConstraint])
 serializable([GenKind, Generator])
-serializable([Kernel, CompileTarget, Target])
+serializable([KernelGradient, Kernel, CompileTarget, Target])
 serializable([TensorKind, TensorDef])
 serializable([ScalarType, Stage, Program])
 

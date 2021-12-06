@@ -126,8 +126,17 @@ type
       of GenReshape: reshape*: seq[int]
       else: discard
   
+  KernelGradient* = object
+    case is_custom*: bool:
+      of true:
+        tensors*: Table[TensorId, TensorId]
+        kernels*: seq[Kernel]
+        subs*: Table[TensorId, TensorId]
+      of false: discard
+  
   Kernel* = ref object
     generator*: Generator
+    grad*: KernelGradient
     regs*: seq[Register]
     setup*: seq[Instr]
     loops*: seq[Loop]
@@ -291,9 +300,18 @@ proc substitute*(op: var TensorOp, subs: Table[RegId, RegId]) =
   if op.data in subs:
     op.data = subs[op.data]
 
+proc clone*(grad: KernelGradient): KernelGradient =
+  result = KernelGradient(is_custom: grad.is_custom)
+  if grad.is_custom:
+    result.tensors = grad.tensors
+    result.subs = grad.subs
+    for kernel in grad.kernels:
+      result.kernels.add(kernel)
+
 proc clone*(kernel: Kernel): Kernel =
   result = Kernel(
     generator: kernel.generator,
+    grad: kernel.grad.clone(),
     regs: kernel.regs,
     loops: kernel.loops,
     reads: kernel.reads,
@@ -318,8 +336,19 @@ proc substitute*(op: var TensorOp, subs: Table[TensorId, TensorId]) =
     dim.substitute(subs)
   op.tensor = subs[op.tensor]
 
+proc substitute*(kernel: Kernel, subs: Table[TensorId, TensorId])
+
+proc substitute*(grad: var KernelGradient, subs: Table[TensorId, TensorId]) =
+  if grad.is_custom:
+    if grad.subs.len > 0:
+      for a, b in grad.subs:
+        grad.subs[a] = subs[b]
+    else:
+      grad.subs = subs
+
 proc substitute*(kernel: Kernel, subs: Table[TensorId, TensorId]) =
   kernel.setup.substitute(subs)
+  kernel.grad.substitute(subs)
   for loop in kernel.loops.mitems:
     loop.substitute(subs)
   for read in kernel.reads.mitems:

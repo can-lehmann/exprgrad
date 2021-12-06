@@ -61,7 +61,14 @@ proc maxpool2*(images: Fun): Fun {.layer.} =
       images[chan, 2 * x, 2 * y + 1, image],
       images[chan, 2 * x + 1, 2 * y + 1, image]
     )
+  ) | custom_grad(
+    grad(images)[chan, x, y, image] ++= select(
+      images[chan, x, y, image] == result[chan, x / 2, y / 2, image],
+      grad(result)[chan, x / 2, y / 2, image],
+      0.0
+    )
   )
+  result.lock()
 
 proc avgpool2*(images: Fun): Fun {.layer.} =
   result[chan, x, y, image] ++= (

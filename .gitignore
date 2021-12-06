@@ -10,8 +10,9 @@ examples/gan/data/
 examples/gan/gan
 examples/gan/model.*
 examples/gan/sample.ppm
-test/test_tensors
-test/test_model
-test/test_serialize
-test/data.bin
+tests/test_tensors
+tests/test_model
+tests/test_serialize
+tests/data.bin
 old/
+data.bin

@@ -28,6 +28,7 @@ type
     tensor*: TensorId
     children: seq[Fun]
     name*: string
+    locked*: bool
     case kind: FunKind:
       of FunInput:
         input_shape: seq[int]
@@ -123,7 +124,7 @@ proc flatten(fun: Fun, target: var Target) =
           var constr = fun.shape_constr
           constr.substitute(subs)
           target.shapes.add(constr)
-      of FunBackwards: 
+      of FunBackwards:
         target.kernels.add(Kernel(generator: Generator(
           kind: GenBackwards, tensor: fun.children[0].tensor
         )))
@@ -198,19 +199,38 @@ type ParserContext = object
   tensor_lookup: Table[string, TensorId]
   tensors: seq[NimNode]
   indices: Table[string, RegId]
+  grads: Table[TensorId, TensorId]
 
 proc hash(fun: Fun): Hash = hash(fun[].addr)
+
+proc is_name(node: NimNode): bool =
+  result = node.kind == nnkIdent or node.kind == nnkSym
+
+proc is_name(node: NimNode, name: string): bool =
+  result = node.is_name and nim_ident_normalize(node.str_val) == nim_ident_normalize(name)
 
 proc register_tensor(ctx: var ParserContext, node: NimNode): TensorId =
   result = TensorId(ctx.tensors.len + 1)
   ctx.tensors.add(node)
 
-proc lookup_tensor(ctx: var ParserContext, tensor: string): TensorId =
-  let name = nim_ident_normalize(tensor)
-  if name notin ctx.tensor_lookup:
-    let id = ctx.register_tensor(ident(tensor))
-    ctx.tensor_lookup[name] = id
-  result = ctx.tensor_lookup[name]
+proc lookup_tensor(ctx: var ParserContext, node: NimNode): TensorId =
+  case node.kind:
+    of nnkSym, nnkIdent:
+      let name = nim_ident_normalize(node.str_val)
+      if name notin ctx.tensor_lookup:
+        let id = ctx.register_tensor(ident(node.str_val))
+        ctx.tensor_lookup[name] = id
+      result = ctx.tensor_lookup[name]
+    of nnkCallKinds:
+      if node[0].is_name("grad") and node.len == 2:
+        let tensor = ctx.lookup_tensor(node[1])
+        if tensor notin ctx.grads:
+          ctx.grads[tensor] = ctx.register_tensor(nil)
+        result = ctx.grads[tensor]
+      else:
+        result = ctx.register_tensor(node)
+    else:
+      result = ctx.register_tensor(node)
 
 proc lookup_index(ctx: var ParserContext, index: string): RegId =
   let name = nim_ident_normalize(index)
@@ -219,12 +239,6 @@ proc lookup_index(ctx: var ParserContext, index: string): RegId =
     ctx.kernel.loops.add(Loop(iter: iter))
     ctx.indices[name] = iter
   result = ctx.indices[name]
-
-proc is_name(node: NimNode): bool =
-  result = node.kind == nnkIdent or node.kind == nnkSym
-
-proc is_name(node: NimNode, name: string): bool =
-  result = node.is_name and nim_ident_normalize(node.str_val) == nim_ident_normalize(name)
 
 proc parse_expr(node: NimNode,
                 instrs: var seq[Instr],
@@ -243,16 +257,13 @@ proc parse_dims*(node: NimNode, ctx: var ParserContext, start: int = 1): seq[Lin
 proc parse_tensor_op(node: NimNode, ctx: var ParserContext): TensorOp =
   case node.kind:
     of nnkCurlyExpr, nnkBracketExpr:
-      if node[0].is_name:
-        result.tensor = ctx.lookup_tensor(node[0].str_val)
-      else:
-        result.tensor = ctx.register_tensor(node[0])
+      result.tensor = ctx.lookup_tensor(node[0])
       result.is_raw = node.kind == nnkCurlyExpr
       result.dims = node.parse_dims(ctx)
     of nnkInfix:
       assert node[0].is_name("*")
       assert node[1].is_name
-      result.tensor = ctx.lookup_tensor(node[1].str_val)
+      result.tensor = ctx.lookup_tensor(node[1])
       result.is_raw = node[2].kind == nnkCurly
       result.dims = node[2].parse_dims(ctx, 0)
     else:
@@ -362,7 +373,7 @@ proc parse_expr(node: NimNode,
           instr = Instr(kind: kind, args: args)
     of nnkCurlyExpr, nnkBracketExpr:
       if node.is_shape_access:
-        let tensor = ctx.lookup_tensor(node[0][0].str_val)
+        let tensor = ctx.lookup_tensor(node[0][0])
         var dim = 0
         if node[1].kind == nnkIntLit:
           dim = int(node[1].int_val)
@@ -389,7 +400,7 @@ proc parse_expr(node: NimNode,
         of "len":
           assert node[0].is_name()
           instr = Instr(kind: InstrLen,
-            tensor: ctx.lookup_tensor(node[0].str_val)
+            tensor: ctx.lookup_tensor(node[0])
           )
         else: raise ParserError(msg: "Unable to parse expression from " & node.repr)
     of nnkPar:
@@ -414,6 +425,8 @@ proc parse_expr(node: NimNode,
   instr.res = result
   instrs.add(instr)
 
+proc parse_body(node: NimNode, ctx: var ParserContext): RegId
+
 proc parse_attribute(node: NimNode, ctx: var ParserContext) =
   case node.kind:
     of nnkCallKinds:
@@ -427,6 +440,25 @@ proc parse_attribute(node: NimNode, ctx: var ParserContext) =
               loop.start.factors[node[2].parse_expr(loop.start.setup, ctx, true)] = 1
               loop.stop.factors[node[3].parse_expr(loop.stop.setup, ctx, true)] = 1
               break
+        of "customgrad":
+          var grad = KernelGradient(is_custom: true)
+          for it in 1..<node.len:
+            var grad_ctx = ParserContext(
+              kernel: Kernel(),
+              tensors: ctx.tensors,
+              tensor_lookup: ctx.tensor_lookup,
+              grads: ctx.grads
+            )
+            let res = node[it][2].parse_body(grad_ctx)
+            grad_ctx.kernel.expr.res = res
+            let (write, new_var) = node[it][1].parse_write(res, grad_ctx)
+            grad_ctx.kernel.write = write
+            grad.kernels.add(grad_ctx.kernel)
+            ctx.grads = grad_ctx.grads
+            ctx.tensors = grad_ctx.tensors
+            ctx.tensor_lookup = grad_ctx.tensor_lookup
+          grad.tensors = ctx.grads
+          ctx.kernel.grad = grad
         else:
           raise ParserError(msg: "Call to " & node[0].str_val & " is not a valid attribute")
     of nnkPar: node[0].parse_attribute(ctx)
@@ -463,6 +495,8 @@ proc register_args(fun: Fun, args: openArray[(Fun, TensorId)]):
     result[id] = fun.args[arg]
 
 proc add_kernel(fun: Fun, kernel: Kernel, args: openArray[(Fun, TensorId)]) =
+  if fun.locked:
+    raise new_exception(ValueError, "Unable to add another kernel to a locked function")
   let subs = fun.register_args(args)
   kernel.substitute(subs)
   fun.kernels.add(kernel)
@@ -500,9 +534,10 @@ proc new_lit(instr: Instr): NimNode =
 proc gen_args(tensors: seq[NimNode]): NimNode =
   result = new_nim_node(nnkBracket)
   for it, node in tensors:
-    result.add(new_tree(nnkTupleConstr, [
-      node, new_lit(TensorId(it + 1))
-    ]))
+    if not node.is_nil:
+      result.add(new_tree(nnkTupleConstr, [
+        node, new_lit(TensorId(it + 1))
+      ]))
 
 macro `++=`*(target, value: untyped): untyped =
   var ctx = ParserContext(kernel: Kernel())
@@ -546,7 +581,7 @@ macro with_shape*(target, dims: untyped): untyped =
     let res = child.parse_expr(instrs, ctx, true)
     shape.dims.add(LinearIndex(factors: to_table({res: 1}), setup: instrs))
   assert target.is_name()
-  shape.dest = ctx.lookup_tensor(target.str_val)
+  shape.dest = ctx.lookup_tensor(target)
   
   result = new_stmt_list([
     new_call(bind_sym("ensure_init"), target),
@@ -565,6 +600,9 @@ macro layer*(fn: untyped): untyped =
     new_tree(nnkDotExpr, ident("result"), ident("name")),
     new_lit(name.str_val)
   ))
+
+proc lock*(fun: Fun) =
+  fun.locked = true
 
 proc param*(shape: openArray[int],
             init_range: HSlice[float64, float64] = -0.1..0.1): Fun =
@@ -630,6 +668,9 @@ proc optimize*(grad, param: Fun, optim: proc (param: var Fun, grad: Fun)): Fun =
 
 proc backprop*(loss: Fun, optim: proc (param: var Fun, grad: Fun)): Fun =
   result = loss.backwards().optimize(optim)
+
+proc grad*(gradients, fun: Fun): Fun =
+  result = Fun(kind: FunGradient, children: @[gradients, fun])
 
 proc reshape*(fun: Fun, shape: openArray[int]): Fun =
   result = Fun(kind: FunReshape,

@@ -17,8 +17,8 @@
 import std/[macros]
 import exprgrad/[tensors, parser, model, ir]
 export tensors
-export Fun, `++=`, with_shape, copy_shape, make_opt
-export param, input, cache, rand, params
+export Fun, `++=`, with_shape, copy_shape, lock, make_opt
+export param, input, cache, rand, params, grad
 export backwards, optimize, backprop, reshape, target, cond
 export Model, compile, call, apply, fit, emit_source
 export ir.`==`, ir.hash

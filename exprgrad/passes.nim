@@ -193,6 +193,9 @@ proc fold_linear_indices*(program: Program) =
   for name, target in program.targets:
     for kernel in target.kernels:
       kernel.fold_linear_indices()
+      if kernel.grad.is_custom:
+        for grad_kernel in kernel.grad.kernels:
+          grad_kernel.fold_linear_indices()
 
 proc dead_code_elim(instrs: var seq[Instr], used: var seq[bool]) =
   var it = instrs.len - 1
@@ -238,9 +241,17 @@ proc dead_code_elim*(kernel: Kernel) =
     kernel.setup.dead_code_elim(used)
 
 proc dead_code_elim*(program: Program) =
+  program.assert_pass("dead_code_elim",
+    produces={},
+    preserves=ALL_STAGES
+  )
+  
   for name, target in program.targets:
     for kernel in target.kernels:
       kernel.dead_code_elim()
+      if kernel.grad.is_custom:
+        for grad_kernel in kernel.grad.kernels:
+          grad_kernel.dead_code_elim()
 
 proc dead_kernel_elim*(program: Program) =
   for name, target in program.targets.mpairs:
@@ -282,9 +293,17 @@ proc deduplicate_reads*(kernel: Kernel) =
   kernel.write.substitute(subs)
 
 proc deduplicate_reads*(program: Program) =
+  program.assert_pass("deduplicate_reads",
+    produces={},
+    preserves=ALL_STAGES
+  )
+  
   for name, target in program.targets:
     for kernel in target.kernels:
       kernel.deduplicate_reads()
+      if kernel.grad.is_custom:
+        for grad_kernel in kernel.grad.kernels:
+          grad_kernel.deduplicate_reads()
 
 proc derive(instrs: seq[Instr],
             regs: var seq[Register],
@@ -462,7 +481,17 @@ proc generate*(program: Program) =
                 ))
                 target.copy_shape(grad_tensor, read.tensor)
                 grad_tensors[read.tensor] = grad_tensor
-            grad_kernels.add(kernel.derive(grad_tensors))
+            
+            if kernel.grad.is_custom:
+              var subs = kernel.grad.subs
+              for tensor, grad in kernel.grad.tensors:
+                subs[grad] = grad_tensors[kernel.grad.subs[tensor]]
+              for it in countdown(kernel.grad.kernels.len - 1, 0):
+                var grad_kernel = kernel.grad.kernels[it].clone()
+                grad_kernel.substitute(subs)
+                grad_kernels.add(grad_kernel)
+            else:
+              grad_kernels.add(kernel.derive(grad_tensors))
           
           target.kernels.delete(it)
           target.kernels.insert(grad_kernels, it)
