@@ -55,6 +55,11 @@ proc read_char*(stream: var ReadStream): char =
 proc peek_uint8*(stream: ReadStream): uint8 = uint8(stream.peek_char())
 proc read_uint8*(stream: var ReadStream): uint8 = uint8(stream.read_char())
 
+proc take_char*(stream: var ReadStream, chr: char): bool =
+  result = stream.peek_char() == chr
+  if result:
+    discard stream.read_char()
+
 proc at_end*(stream: ReadStream): bool = stream.left <= 0
 
 proc skip*(stream: var ReadStream, count: int) =
@@ -67,6 +72,14 @@ proc skip*(stream: var ReadStream, chars: set[char]) =
 
 proc skip_whitespace*(stream: var ReadStream) =
   stream.skip({' ', '\n', '\t', '\r'})
+
+proc skip_until*(stream: var ReadStream, stop: set[char]) =
+  while stream.peek_char() notin stop:
+    discard stream.read_char()
+
+proc read_until*(stream: var ReadStream, stop: set[char]): string =
+  while stream.peek_char() notin stop:
+    result.add(stream.read_char())
 {.pop.}
 
 type WriteStream* = object
