@@ -24,9 +24,12 @@ type ReadStream* = object
 
 proc fill_buffer(stream: var ReadStream) =
   stream.cur = 0
-  stream.left = stream.file.read_buffer(
-    stream.buffer[0].addr, stream.buffer.len
-  )
+  if stream.file.is_nil:
+    zero_mem(stream.buffer[0].addr, stream.buffer.len)
+  else:
+    stream.left = stream.file.read_buffer(
+      stream.buffer[0].addr, stream.buffer.len
+    )
 
 proc open_read_stream*(path: string, buffer_size: int = 2 ^ 14): ReadStream =
   assert buffer_size > 0
@@ -35,6 +38,10 @@ proc open_read_stream*(path: string, buffer_size: int = 2 ^ 14): ReadStream =
   result.file = open(path, fmRead)
   result.buffer = new_string(buffer_size)
   result.fill_buffer()
+
+proc init_read_stream*(str: string): ReadStream =
+  result.buffer = str
+  result.left = str.len
 
 proc close*(stream: var ReadStream) =
   if not stream.file.is_nil:
@@ -74,11 +81,11 @@ proc skip_whitespace*(stream: var ReadStream) =
   stream.skip({' ', '\n', '\t', '\r'})
 
 proc skip_until*(stream: var ReadStream, stop: set[char]) =
-  while stream.peek_char() notin stop:
+  while not stream.at_end and stream.peek_char() notin stop:
     discard stream.read_char()
 
 proc read_until*(stream: var ReadStream, stop: set[char]): string =
-  while stream.peek_char() notin stop:
+  while not stream.at_end and stream.peek_char() notin stop:
     result.add(stream.read_char())
 {.pop.}
 

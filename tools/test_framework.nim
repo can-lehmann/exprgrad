@@ -23,18 +23,16 @@ add_exit_proc(proc() {.closure.} =
 
 type TestError = ref object of CatchableError
   env: seq[(string, string)]
+  line, column: int
 
 template test*(name: string, body: untyped) =
-  var
-    success = true
-    env: seq[(string, string)]
+  var error: TestError = nil
   try:
     body
   except TestError as err:
-    success = false
-    env = err.env
+    error = err
 
-  if success:
+  if error.is_nil:
     stdout.set_foreground_color(fgGreen)
     stdout.write("[✓] ")
     stdout.reset_attributes()
@@ -47,8 +45,9 @@ template test*(name: string, body: untyped) =
     stdout.write("Test Failed: ")
     stdout.reset_attributes()
     stdout.write(name)
+    stdout.write(" (" & $error.line & ", " & $error.column & ")")
     stdout.write("\n")
-    for (var_name, value) in env:
+    for (var_name, value) in error.env:
       stdout.set_foreground_color(fgRed)
       stdout.write(var_name & ": ")
       stdout.reset_attributes()
@@ -88,6 +87,9 @@ macro check*(cond: untyped): untyped =
       new_lit(name), new_call(bind_sym("stringify_env_var"), ident(name))
     ]))
   env = new_call(bind_sym("@"), env)
+  let
+    line = cond.line_info_obj.line
+    column = cond.line_info_obj.column
   result = quote:
     if not `cond`:
-      raise TestError(msg: `cond_str`, env: `env`)
+      raise TestError(msg: `cond_str`, env: `env`, line: `line`, column: `column`)

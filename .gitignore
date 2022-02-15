@@ -13,6 +13,7 @@ examples/gan/sample.ppm
 tests/test_tensors
 tests/test_model
 tests/test_serialize
+tests/test_json
 tests/data.bin
 old/
 data.bin
