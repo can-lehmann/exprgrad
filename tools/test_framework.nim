@@ -64,11 +64,13 @@ proc collect_env(node: NimNode): HashSet[string] =
   case node.kind:
     of nnkIdent, nnkSym:
       result.incl(node.str_val)
-    of nnkCallKinds:
+    of nnkCallKinds, nnkObjConstr:
       for it in 1..<node.len:
         result = union(result, node[it].collect_env())
     of nnkDotExpr:
       result = node[0].collect_env()
+    of nnkExprColonExpr:
+      result = node[1].collect_env()
     else:
       for child in node:
         result = union(result, child.collect_env())

@@ -22,6 +22,7 @@ proc read_name(stream: var ReadStream): string =
   result = stream.read_until({' ', '\n', '\t', '\r', '{', '}', '[', ']', '\"', ',', ':'})
 
 proc parse_json*(stream: var ReadStream, value: var bool) =
+  stream.skip_whitespace()
   let name = stream.read_name()
   case name:
     of "true": value = true
@@ -171,8 +172,146 @@ proc parse_json*(stream: var ReadStream, node: var JsonNode) =
           else:
             node = new_jint(parse_int(name))
 
-macro serialize_json*(typ: typed) =
-  discard # TODO
+type
+  FieldKind = enum
+    FieldNone, FieldDiscr, FieldCase
+  
+  Field = object
+    name: string
+    typ: NimNode
+    kind: FieldKind
+
+proc unwrap_name(node: NimNode): NimNode =
+  result = node
+  while result.kind notin {nnkIdent, nnkSym}:
+    case result.kind:
+      of nnkPostfix: result = result[1]
+      else: error("Unable to unwrap name from " & $result.kind)
+
+proc collect_fields(node: NimNode, kind: FieldKind = FieldNone): seq[Field] =
+  case node.kind:
+    of nnkRecList, nnkElse:
+      for def in node:
+        result.add(def.collect_fields(kind))
+    of nnkIdentDefs:
+      for it in 0..<(node.len - 2):
+        result.add(Field(
+          name: node[it].unwrap_name().str_val,
+          typ: node[^2],
+          kind: kind
+        ))
+    of nnkRecCase:
+      result.add(node[0].collect_fields(FieldDiscr))
+      for it in 1..<node.len:
+        result.add(node[it].collect_fields(FieldCase))
+    of nnkOfBranch:
+      for it in 1..<node.len:
+        result.add(node[it].collect_fields(kind))
+    else:
+      discard
+
+proc gen_field_assignments(node: NimNode, stmts: NimNode) =
+  case node.kind:
+    of nnkRecList:
+      for child in node:
+        child.gen_field_assignments(stmts)
+    of nnkIdentDefs:
+      let value = ident("value")
+      for it in 0..<(node.len - 2):
+        let name = node[it].unwrap_name().str_val
+        stmts.add(new_assignment(
+          new_tree(nnkDotExpr, value, ident(name)),
+          ident(name)
+        ))
+    of nnkOfBranch:
+      let body = new_stmt_list()
+      for it in 1..<node.len:
+        node[it].gen_field_assignments(body)
+      stmts.add(new_tree(nnkOfBranch, node[0], body))
+    of nnkElse:
+      let body = new_stmt_list()
+      for child in node:
+        child.gen_field_assignments(body)
+      stmts.add(new_tree(nnkElse, body))
+    of nnkRecCase:
+      let
+        discr = node[0][0].unwrap_name().str_val
+        case_stmt = new_tree(nnkCaseStmt, ident(discr))
+      for it in 1..<node.len:
+        node[it].gen_field_assignments(case_stmt)
+      stmts.add(case_stmt)
+    else:
+      discard
+
+proc gen_parser(typ, name, stmts: NimNode) =
+  let (stream, value) = (ident("stream"), ident("value"))
+  case typ.kind:
+    of nnkSym, nnkIdent:
+      typ.get_impl().gen_parser(typ, stmts)
+    of nnkTypeDef:
+      typ[^1].gen_parser(name, stmts)
+    of nnkEnumTy:
+      stmts.add: quote:
+        var id: int
+        parse_json(`stream`, id)
+        `value` = `name`(id)
+    of nnkObjectTy:
+      typ[2].gen_parser(name, stmts)
+    of nnkRecList:
+      var
+        fields = typ.collect_fields()
+      
+      let var_section = new_tree(nnkVarSection)
+      for field in fields:
+        var_section.add(new_tree(nnkIdentDefs,
+          ident(field.name), field.typ, new_empty_node()
+        ))
+      stmts.add(var_section)
+      
+      let
+        field_name_sym = gen_sym(nskForVar, "field_name")
+        case_stmt = new_tree(nnkCaseStmt, new_call(
+          bind_sym("nim_ident_normalize"), field_name_sym
+        ))
+      for field in fields:
+        var target = ident(field.name)
+        case_stmt.add(new_tree(nnkOfBranch,
+          new_lit(nim_ident_normalize(field.name)),
+          new_stmt_list(new_call("parse_json", stream, target))
+        ))
+      case_stmt.add: new_tree(nnkElse): quote:
+        raise new_exception(ValueError, "Unknown field")
+      stmts.add(new_tree(nnkForStmt,
+        field_name_sym,
+        new_call(bind_sym("iter_json_object"), stream),
+        new_stmt_list(case_stmt)
+      ))
+      
+      let constr = new_tree(nnkObjConstr, name)
+      for field in fields:
+        if field.kind == FieldDiscr:
+          constr.add(new_tree(nnkExprColonExpr,
+            ident(field.name), ident(field.name)
+          ))
+      stmts.add(new_assignment(value, constr))
+      typ.gen_field_assignments(stmts)
+    else:
+      error("Unable to generate json parser for " & $typ.kind)
+
+proc gen_parser(typ: NimNode): NimNode =
+  let
+    body = new_stmt_list()
+    (stream, value) = (ident("stream"), ident("value"))
+  typ.gen_parser(nil, body)
+  result = quote:
+    proc parse_json(`stream`: var ReadStream, `value`: var `typ`) =
+      `body`
+
+macro json_serializable*(types: varargs[typed]): untyped =
+  result = new_stmt_list()
+  for typ in types:
+    result.add(typ.gen_parser())
+  echo result.repr
 
 proc parse_json*[T](str: string): T =
   mixin parse_json

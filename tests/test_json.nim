@@ -39,20 +39,66 @@ test "collections":
     "x": new_seq[int](), "y": @[1], "z": @[2, 3]
   })
   check parse_json[Table[string, seq[int]]]("{}") == init_table[string, seq[int]]()
+  check parse_json[Table[string, int]]("{\"one\": 1}") == to_table({"one": 1})
+  check parse_json[Table[string, bool]]("{\"true\": true}") == to_table({"true": true})
 
-test "serialize_json":
-  type
-    TestObjKind = enum
-      TestObjArray, TestObjSeq
-    
-    TestObj = object
-      bool_val: bool
-      int_val: int 
-      float_val: float
-      table_val: Table[string, int]
-      case kind: TestObjKind:
-        of TestObjArray: array_val: array[3, int]
-        of TestObjSeq: seq_val: seq[int]
+type
+  TestObjKind = enum
+    TestObjArray, TestObjSeq
+  
+  TestObj = object
+    x: int
+    y: string
+    z: Table[string, bool]
+  
+  TestObj2 = object
+    bool_val: bool
+    int_val: int 
+    float_val: float
+    table_val: Table[string, int]
+    case kind: TestObjKind:
+      of TestObjArray: array_val: array[3, int]
+      of TestObjSeq: seq_val: seq[int]
+
+proc `==`(a, b: TestObj2): bool =
+  result = a.bool_val == b.bool_val and
+           a.int_val == b.int_val and
+           a.float_val == b.float_val and
+           a.table_val == b.table_val
+  if result and a.kind == b.kind:
+    case a.kind:
+      of TestObjArray: result = a.array_val == b.array_val
+      of TestObjSeq: result = a.seq_val == b.seq_val
+  else:
+    result = false
+
+json_serializable(TestObjKind, TestObj, TestObj2)
+
+test "json_serializable":
+  check parse_json[TestObjKind]("0") == TestObjArray
+  check parse_json[TestObjKind]("1") == TestObjSeq
+  check parse_json[TestObj]("{}") == TestObj()
+  check parse_json[TestObj]("{\"x\": 1}") == TestObj(x: 1)
+  check parse_json[TestObj]("{\"y\": \"Hello\", \"x\": 2}") == TestObj(x: 2, y: "Hello")
+  check parse_json[TestObj]("{\"y\": \"Test\", \"x\": 3, \"z\": {\"true\": true}}") == TestObj(
+    x: 3, y: "Test", z: to_table({"true": true})
+  )
+  check parse_json[TestObj2]("{}") == TestObj2()
+  check parse_json[TestObj2]("{\"bool_val\": true}") == TestObj2(bool_val: true)
+  check parse_json[TestObj2]("{\"bool_val\": true, \"table_val\": {}}") == TestObj2(bool_val: true)
+  check parse_json[TestObj2]("{\"bool_val\": true, \"table_val\": {\"zero\": 0}}") == TestObj2(
+    bool_val: true, table_val: to_table({"zero": 0})
+  )
+  check parse_json[TestObj2]("{\"bool_val\": true, \"table_val\": {\"zero\": 0}, \"kind\": 1}") == TestObj2(
+    bool_val: true, table_val: to_table({"zero": 0}), kind: TestObjSeq
+  )
+  check parse_json[TestObj2]("{\"seq_val\": [1, 2, 3, 4], \"kind\": 1}") == TestObj2(
+    kind: TestObjSeq, seq_val: @[1, 2, 3, 4]
+  )
+  check parse_json[TestObj2]("{\"seq_val\": [1, 2, 3, 4], \"kind\": 0}") == TestObj2(kind: TestObjArray)
+  check parse_json[TestObj2]("{\"array_val\": [1, 2, 3], \"kind\": 0}") == TestObj2(
+    kind: TestObjArray, array_val: [1, 2, 3]
+  )
 
 test "json_node":
   check parse_json[JsonNode]("1") == new_jint(1)
