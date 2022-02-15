@@ -21,7 +21,7 @@ type
   FunKind* = enum
     FunInput, FunParam, FunResult, FunCache, FunRandom,
     FunBackwards, FunGradient, FunEffect, FunMultiple,
-    FunReshape, FunTarget, FunCond
+    FunReshape, FunTarget, FunCond, FunGradientArg
   
   Fun* = ref object
     targets: HashSet[string]
@@ -48,7 +48,7 @@ type
         cond_else: Fun
       of FunTarget:
         compile_target: CompileTarget
-      of FunBackwards, FunGradient, FunMultiple:
+      of FunBackwards, FunGradient, FunMultiple, FunGradientArg:
         discard
 
 proc hash(fun: Fun): Hash = hash(fun[].addr)
@@ -253,55 +253,6 @@ proc literal(value: float64): Scalar =
 proc iterator_literal(name: string): Index =
   result = Index(ExprBuilder(kind: ExprIter, iter: name))
 
-#[
-proc parse_attribute(node: NimNode, ctx: var ParserContext) =
-  case node.kind:
-    of nnkCallKinds:
-      assert node[0].is_name()
-      case node[0].str_val.nim_ident_normalize:
-        of "loop":
-          let iter = ctx.lookup_index(node[1].str_val)
-          for loop in ctx.kernel.loops.mitems:
-            if loop.iter == iter:
-              loop.has_bounds = true
-              loop.start.factors[node[2].parse_expr(loop.start.setup, ctx, true)] = 1
-              loop.stop.factors[node[3].parse_expr(loop.stop.setup, ctx, true)] = 1
-              break
-        of "customgrad":
-          var grad = KernelGradient(is_custom: true)
-          for it in 1..<node.len:
-            var grad_ctx = ParserContext(
-              kernel: Kernel(),
-              tensors: ctx.tensors,
-              tensor_lookup: ctx.tensor_lookup,
-              grads: ctx.grads
-            )
-            let res = node[it][2].parse_body(grad_ctx)
-            grad_ctx.kernel.expr.res = res
-            let (write, new_var) = node[it][1].parse_write(res, grad_ctx)
-            grad_ctx.kernel.write = write
-            grad.kernels.add(grad_ctx.kernel)
-            ctx.grads = grad_ctx.grads
-            ctx.tensors = grad_ctx.tensors
-            ctx.tensor_lookup = grad_ctx.tensor_lookup
-          grad.tensors = ctx.grads
-          ctx.kernel.grad = grad
-        else:
-          raise ParserError(msg: "Call to " & node[0].str_val & " is not a valid attribute")
-    of nnkPar: node[0].parse_attribute(ctx)
-    of nnkTupleConstr:
-      for child in node:
-        child.parse_attribute(ctx)
-    else: raise ParserError(msg: node.repr & " is not a valid attribute")
-
-proc parse_body(node: NimNode, ctx: var ParserContext): RegId =
-  if node.kind in nnkCallKinds and node[0].is_name("|"):
-    result = node[1].parse_body(ctx)
-    node[2].parse_attribute(ctx)
-  else:
-    result = node.parse_expr(ctx.kernel.expr.instrs, ctx, true)
-]#
-
 proc clear*(builder: ExprBuilder) =
   builder.res = init_table[int, RegId]()
   for child in builder.children:
@@ -311,6 +262,7 @@ type BuildContext = object
   kernel: Kernel
   tensors: Table[Fun, TensorId]
   iters: Table[string, RegId]
+  grads: Table[TensorId, TensorId]
   block_count: int
 
 proc alloc_block(ctx: var BuildContext): int =
@@ -318,9 +270,15 @@ proc alloc_block(ctx: var BuildContext): int =
   ctx.block_count += 1
 
 proc lookup_tensor(ctx: var BuildContext, tensor: Fun): TensorId =
-  if tensor notin ctx.tensors:
-    ctx.tensors[tensor] = TensorId(ctx.tensors.len + 1)
-  result = ctx.tensors[tensor]
+  if tensor.kind == FunGradientArg:
+    let id = ctx.lookup_tensor(tensor.children[0])
+    if id notin ctx.grads:
+      ctx.grads[id] = TensorId(ctx.grads.len + ctx.tensors.len + 1)
+    result = ctx.grads[id]
+  else:
+    if tensor notin ctx.tensors:
+      ctx.tensors[tensor] = TensorId(ctx.grads.len + ctx.tensors.len + 1)
+    result = ctx.tensors[tensor]
 
 proc build*(builder: ExprBuilder,
             instrs: var seq[Instr],
@@ -386,31 +344,62 @@ proc register_args(fun: Fun, ctx: BuildContext) =
       fun.args[arg] = id
       fun.children.add(arg)
 
-proc add_kernel(target: Fun, dims: openArray[Index], is_raw: bool, value: Scalar) =
-  if target.locked:
-    raise new_exception(ValueError, "Unable to add another kernel to a locked function")
-  if target.kind notin {FunResult, FunEffect}:
-    raise new_exception(ValueError, "Unable to add a kernel to " & $target.kind)
-  
-  var
-    kernel = Kernel()
-    ctx = BuildContext(kernel: kernel, tensors: target.args)
-  kernel.expr = ExprBuilder(value).build_expr(ctx)
-  kernel.write = TensorOp(
-    tensor: ctx.lookup_tensor(target),
-    is_raw: is_raw,
-    data: kernel.expr.res
+type KernelBuilder = ref object
+  target: Fun
+  dims: seq[Index]
+  is_raw: bool
+  value: Scalar
+  has_custom_grad: bool
+  grads: seq[KernelBuilder]
+
+proc with_custom_grad(builder: KernelBuilder, grads: openArray[KernelBuilder]): KernelBuilder =
+  result = builder
+  result.has_custom_grad = true
+  for grad in grads:
+    result.grads.add(grad)
+
+proc build(builder: KernelBuilder, ctx: var BuildContext): Kernel =
+  result = Kernel()
+  ctx.kernel = result
+  result.expr = ExprBuilder(builder.value).build_expr(ctx)
+  result.write = TensorOp(
+    tensor: ctx.lookup_tensor(builder.target),
+    is_raw: builder.is_raw,
+    data: result.expr.res
   )
-  for dim in dims:
-    kernel.write.dims.add(ExprBuilder(dim).build_linear_index(ctx))
-  target.kernels.add(kernel)
-  target.register_args(ctx)
+  for dim in builder.dims:
+    result.write.dims.add(ExprBuilder(dim).build_linear_index(ctx))
+  if builder.has_custom_grad:
+    result.grad = KernelGradient(is_custom: true)
+    var grads = init_table[TensorId, TensorId]()
+    for grad in builder.grads:
+      var grad_ctx = BuildContext(tensors: ctx.tensors, grads: grads)
+      result.grad.kernels.add(grad.build(grad_ctx))
+      if grad_ctx.tensors != ctx.tensors:
+        raise ParserError(msg: "Gradient kernel may only use tensors (and their gradients) which the forward pass also uses.")
+      grads = grad_ctx.grads
+    result.grad.tensors = grads
+
+proc add_kernel(builder: KernelBuilder) =
+  if builder.target.locked:
+    raise ParserError(msg: "Unable to add another kernel to a locked function")
+  if builder.target.kind notin {FunResult, FunEffect}:
+    raise ParserError(msg: "Unable to add a kernel to " & $builder.target.kind)
+  
+  var ctx = BuildContext(tensors: builder.target.args)
+  builder.target.kernels.add(builder.build(ctx))
+  builder.target.register_args(ctx)
 
 proc is_name(node: NimNode): bool =
   result = node.kind == nnkIdent or node.kind == nnkSym
 
 proc is_name(node: NimNode, name: string): bool =
   result = node.is_name and nim_ident_normalize(node.str_val) == nim_ident_normalize(name)
+
+proc new_obj_constr(typ: NimNode, attrs: openArray[(string, NimNode)]): NimNode =
+  result = new_tree(nnkObjConstr, typ)
+  for (name, value) in attrs:
+    result.add(new_tree(nnkExprColonExpr, ident(name), value))
 
 proc wrap_expr(node: NimNode, locals: var HashSet[string]): NimNode =
   case node.kind:
@@ -447,7 +436,7 @@ proc wrap_expr(node: NimNode, locals: var HashSet[string]): NimNode =
       for child in node:
         result.add(child.wrap_expr(locals))
 
-macro quote_expr(expr: untyped): untyped =
+macro quote_expr*(expr: untyped): untyped =
   var locals = init_hash_set[string]()
   result = expr.wrap_expr(locals)
 
@@ -476,19 +465,68 @@ proc parse_target(node: NimNode, locals: var HashSet[string]): TargetInfo =
     else:
       error("Invalid target: " & node.repr)
 
-macro `++=`*(target_node, value_node: untyped): untyped =
+proc extract_attributes(node: NimNode, attrs: var seq[NimNode]) =
+  case node.kind:
+    of nnkPar: node[0].extract_attributes(attrs)
+    of nnkTupleConstr:
+      for child in node:
+        child.extract_attributes(attrs)
+    of nnkCallKinds:
+      attrs.add(node)
+    else:
+      raise ParserError(msg: node.repr & " is not a valid kernel attribute")
+
+proc remove_attributes(node: NimNode): tuple[expr: NimNode, attrs: seq[NimNode]] =
+  result.expr = node
+  while result.expr.kind in nnkCallKinds and
+        result.expr[0].is_name("|"):
+    result.expr[2].extract_attributes(result.attrs)
+    result.expr = result.expr[1]
+
+proc gen_kernel_builder(target: TargetInfo, value: NimNode, attrs: seq[NimNode]): NimNode
+
+proc gen_custom_grad(node: NimNode): NimNode =
+  if node.kind != nnkInfix or not node[0].is_name("++=") or node.len != 3:
+    raise ParserError(msg: "Custom gradient must be a valid kernel")
+  
+  var locals = init_hash_set[string]()
+  let
+    target = node[1].parse_target(locals)
+    (value_node, attrs) = node[2].remove_attributes()
+    value = value_node.wrap_expr(locals)
+  
+  result = gen_kernel_builder(target, value, attrs)
+
+proc gen_kernel_builder(target: TargetInfo, value: NimNode, attrs: seq[NimNode]): NimNode =
+  result = new_obj_constr(bind_sym("KernelBuilder"), {
+    "target": target.tensor,
+    "dims": new_call(bind_sym("@"), new_tree(nnkBracket, target.dims)),
+    "is_raw": new_lit(target.is_raw),
+    "value": value
+  })
+  for attr in attrs:
+    assert attr[0].is_name
+    case nim_ident_normalize(attr[0].str_val):
+      of "customgrad":
+        var grads: seq[NimNode] = @[]
+        for it in 1..<attr.len:
+          grads.add(attr[it].gen_custom_grad())
+        result = new_call(bind_sym("with_custom_grad"), result, new_tree(nnkBracket, grads))
+      else:
+        result = new_call(attr[0], @[result] & attr[1..^1])
+
+macro `++=`*(target_node, body_node: untyped): untyped =
   var locals = init_hash_set[string]()
   let
     target = target_node.parse_target(locals)
+    (value_node, attrs) = body_node.remove_attributes()
     value = value_node.wrap_expr(locals)
   
   result = new_stmt_list()
   if target.define_tensor:
     result.add(new_var_stmt(target.tensor, new_call(bind_sym("Fun"), new_nil_lit())))
   result.add(new_call(bind_sym("ensure_init"), target.tensor))
-  result.add(new_call(bind_sym("add_kernel"), [
-    target.tensor, new_tree(nnkBracket, target.dims), new_lit(target.is_raw), value
-  ]))
+  result.add(new_call(bind_sym("add_kernel"), gen_kernel_builder(target, value, attrs)))
 
 proc use_shape(fun: Fun, shape: ShapeConstraint, args: openArray[(Fun, TensorId)]) =
   if fun.kind != FunResult:
@@ -611,6 +649,9 @@ proc backprop*(loss: Fun, optim: proc (param: var Fun, grad: Fun)): Fun =
 
 proc grad*(gradients, fun: Fun): Fun =
   result = Fun(kind: FunGradient, children: @[gradients, fun])
+
+proc grad*(fun: Fun): Fun =
+  result = Fun(kind: FunGradientArg, children: @[fun])
 
 proc reshape*(fun: Fun, shape: openArray[int]): Fun =
   result = Fun(kind: FunReshape,

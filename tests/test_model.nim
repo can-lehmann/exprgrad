@@ -100,7 +100,7 @@ test "xor":
   
   check squares(model.call("predict", {"x": train_x}) - train_y).sum() < 0.1
 
-#[
+
 test "custom_grad":
   let inp = input("inp")
   identity*{x} ++= inp{x} | custom_grad(
@@ -119,4 +119,3 @@ test "custom_grad":
     let tensor = new_tensor[float32]([2, 2], @[float32 1, 2, 3, 4])
     check model.call("identity", {"inp": tensor}) == tensor
     check model.call("grad", {"inp": tensor}) == tensor * 2
-]#
