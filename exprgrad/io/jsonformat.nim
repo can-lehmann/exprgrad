@@ -14,7 +14,7 @@
 
 # Fast JSON parser
 
-import std/[macros, strutils]
+import std/[macros, strutils, tables]
 import std/json except parse_json
 import faststreams
 
@@ -41,6 +41,10 @@ proc parse_json*(stream: var ReadStream, value: var int) =
     value += ord(stream.read_char()) - ord('0')
   if is_negated:
     value *= -1
+
+proc parse_json*(stream: var ReadStream, value: var float) =
+  stream.skip_whitespace()
+  value = stream.read_name().parse_float()
 
 proc parse_json*(stream: var ReadStream, value: var string) =
   value = ""
@@ -109,6 +113,31 @@ iterator iter_json_object*(stream: var ReadStream): string =
   
   if not stream.take_char('}'):
     raise new_exception(ValueError, "Expected } at end of json object")
+
+proc parse_json*[T](stream: var ReadStream, value: var seq[T]) =
+  mixin parse_json
+  value = new_seq[T]()
+  for it in stream.iter_json_array():
+    var item: T
+    stream.parse_json(item)
+    value.add(item)
+
+proc parse_json*[L, T](stream: var ReadStream, value: var array[L, T]) =
+  mixin parse_json
+  var count = 0
+  for it in stream.iter_json_array():
+    stream.parse_json(value[it])
+    count += 1
+  if count != value.len:
+    raise new_exception(ValueError, "Expected exactly " & $value.len & " items in array")
+
+proc parse_json*[T](stream: var ReadStream, tab: var Table[string, T]) =
+  mixin parse_json
+  tab = init_table[string, T]()
+  for name in stream.iter_json_object():
+    var value: T
+    stream.parse_json(value)
+    tab[name] = value
 
 proc parse_json*(stream: var ReadStream, node: var JsonNode) =
   stream.skip_whitespace()
