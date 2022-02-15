@@ -51,6 +51,8 @@ type
       of FunBackwards, FunGradient, FunMultiple:
         discard
 
+proc hash(fun: Fun): Hash = hash(fun[].addr)
+
 proc alloc_tensors(fun: Fun, program: Program) =
   if fun.tensor == TensorId(0):
     case fun.kind:
@@ -194,239 +196,64 @@ proc to_program*(graphs: openArray[Fun]): Program =
     fun.flatten(target)
     result.targets[name] = target
 
-type ParserContext = object
-  kernel: Kernel
-  tensor_lookup: Table[string, TensorId]
-  tensors: seq[NimNode]
-  indices: Table[string, RegId]
-  grads: Table[TensorId, TensorId]
+proc `$`(fun: Fun): string =
+  if fun.is_nil:
+    result = "nil"
+  else:
+    result = "<fun>"
 
-proc hash(fun: Fun): Hash = hash(fun[].addr)
+proc ensure_init(fun: var Fun) =
+  if fun.is_nil:
+    fun = Fun(kind: FunResult)
+  if fun.args.len == 0:
+    fun.args[fun] = TensorId(1)
 
-proc is_name(node: NimNode): bool =
-  result = node.kind == nnkIdent or node.kind == nnkSym
+proc register_args(fun: Fun, args: openArray[(Fun, TensorId)]): Table[TensorId, TensorId] =
+  for (arg, id) in args:
+    if arg notin fun.args:
+      fun.args[arg] = TensorId(fun.args.len + 1)
+      fun.children.add(arg)
+    result[id] = fun.args[arg]
 
-proc is_name(node: NimNode, name: string): bool =
-  result = node.is_name and nim_ident_normalize(node.str_val) == nim_ident_normalize(name)
-
-proc register_tensor(ctx: var ParserContext, node: NimNode): TensorId =
-  result = TensorId(ctx.tensors.len + 1)
-  ctx.tensors.add(node)
-
-proc lookup_tensor(ctx: var ParserContext, node: NimNode): TensorId =
-  case node.kind:
-    of nnkSym, nnkIdent:
-      let name = nim_ident_normalize(node.str_val)
-      if name notin ctx.tensor_lookup:
-        let id = ctx.register_tensor(ident(node.str_val))
-        ctx.tensor_lookup[name] = id
-      result = ctx.tensor_lookup[name]
-    of nnkCallKinds:
-      if node[0].is_name("grad") and node.len == 2:
-        let tensor = ctx.lookup_tensor(node[1])
-        if tensor notin ctx.grads:
-          ctx.grads[tensor] = ctx.register_tensor(nil)
-        result = ctx.grads[tensor]
-      else:
-        result = ctx.register_tensor(node)
-    else:
-      result = ctx.register_tensor(node)
-
-proc lookup_index(ctx: var ParserContext, index: string): RegId =
-  let name = nim_ident_normalize(index)
-  if name notin ctx.indices:
-    let iter = ctx.kernel.regs.alloc(Register(name: name))
-    ctx.kernel.loops.add(Loop(iter: iter))
-    ctx.indices[name] = iter
-  result = ctx.indices[name]
-
-proc parse_expr(node: NimNode,
-                instrs: var seq[Instr],
-                ctx: var ParserContext,
-                is_main_expr: bool = false): RegId
-
-proc parse_dims*(node: NimNode, ctx: var ParserContext, start: int = 1): seq[LinearIndex] =
-  for it in start..<node.len:
-    var instrs: seq[Instr]
-    let res = node[it].parse_expr(instrs, ctx)
-    result.add(LinearIndex(
-      setup: instrs,
-      factors: to_table({res: 1})
-    ))
-
-proc parse_tensor_op(node: NimNode, ctx: var ParserContext): TensorOp =
-  case node.kind:
-    of nnkCurlyExpr, nnkBracketExpr:
-      result.tensor = ctx.lookup_tensor(node[0])
-      result.is_raw = node.kind == nnkCurlyExpr
-      result.dims = node.parse_dims(ctx)
-    of nnkInfix:
-      assert node[0].is_name("*")
-      assert node[1].is_name
-      result.tensor = ctx.lookup_tensor(node[1])
-      result.is_raw = node[2].kind == nnkCurly
-      result.dims = node[2].parse_dims(ctx, 0)
-    else:
-      raise ParserError(msg: "Cannot parse tensor operation from " & $node.kind)
-
-proc parse_write(node: NimNode, value: RegId, ctx: var ParserContext): (TensorOp, bool) =
-  result[0] = node.parse_tensor_op(ctx)
-  result[0].data = value
-  result[1] = node.kind == nnkInfix
-
-proc is_shape_access(node: NimNode): bool =
-  node.kind == nnkBracketExpr and
-  node[0].kind == nnkDotExpr and
-  node[0][1].is_name("shape") and
-  node[0][0].is_name()
-
-proc parse_expr(node: NimNode,
-                instrs: var seq[Instr],
-                ctx: var ParserContext,
-                is_main_expr: bool = false): RegId =
-  var instr: Instr
-  case node.kind:
-    of nnkIntLit..nnkUint64Lit:
-      instr = Instr(kind: InstrIndex,
-        index_lit: int(node.int_val)
-      )
-    of nnkFloatLit..nnkFloat128Lit:
-      instr = Instr(kind: InstrScalar,
-        scalar_lit: float64(node.float_val)
-      )
-    of nnkSym, nnkIdent:
-      let name = nim_ident_normalize(node.str_val)
-      case name:
-        of "true", "false": 
-          instr = Instr(kind: InstrBoolean,
-            boolean_lit: name == "true"
-          )
-        else:
-          return ctx.lookup_index(name)
-    of nnkCallKinds:
-      if not node[0].is_name:
-        raise ParserError(msg: "Indirect calls are not supported")
-      let name = nim_ident_normalize(node[0].str_val)
-      case name:
-        of "@":
-          assert node[1].is_name()
-          result = ctx.kernel.regs.alloc()
-          instrs.add(Instr(kind: InstrExtern,
-            extern: node[1].str_val,
-            res: result
-          ))
-          return
-        else: discard
-      var args: seq[RegId] = @[]
-      for it in 1..<node.len:
-        args.add(node[it].parse_expr(instrs, ctx, is_main_expr=is_main_expr))
-      case name:
-        of "-":
-          case args.len:
-            of 1: instr = Instr(kind: InstrNegate, args: args)
-            of 2: instr = Instr(kind: InstrSub, args: args)
-            else: raise ParserError(msg: name & " expects one or two arguments, but got " & $args.len) 
-        of "sq":
-          if args.len != 1:
-            raise ParserError(msg: name & " expects one arguments, but got " & $args.len)
-          instr = Instr(kind: InstrMul, args: @[args[0], args[0]])
-        of "min", "max":
-          if args.len != 2:
-            raise ParserError(msg: name & " expects two arguments, but got " & $args.len)
-          let cond = ctx.kernel.regs.alloc()
-          instrs.add(Instr(kind: InstrLt, args: args, res: cond))
-          if name == "max":
-            swap(args[0], args[1])
-          instr = Instr(kind: InstrSelect, args: @[cond, args[0], args[1]])
-        else:
-          let (kind, arg_count) = case name:
-            of "+": (InstrAdd, 2)
-            of "*": (InstrMul, 2)
-            of "/": (InstrDiv, 2)
-            of "==": (InstrEq, 2)
-            of "<": (InstrLt, 2)
-            of "<=": (InstrLe, 2)
-            of ">":
-              swap(args[0], args[1])
-              (InstrLt, 2)
-            of ">=":
-              swap(args[0], args[1])
-              (InstrLe, 2)
-            of "select": (InstrSelect, 3)
-            of "Scalar": (InstrToScalar, 1)
-            of "Index": (InstrToIndex, 1)
-            of "sin": (InstrSin, 1)
-            of "cos": (InstrCos, 1)
-            of "exp": (InstrExp, 1)
-            of "pow": (InstrPow, 2)
-            of "sqrt": (InstrSqrt, 1)
-            of "log": (InstrLog, 2)
-            of "ln": (InstrLn, 1)
-            of "log2": (InstrLog2, 1)
-            of "log10": (InstrLog10, 1)
-            of "epoch": (InstrEpoch, 0)
-            else: (InstrIndex, -1)
-          if arg_count == -1:
-            raise ParserError(msg: name & " is not a valid instruction")
-          if arg_count != args.len:
-            raise ParserError(msg: name & " expects " & $arg_count & " arguments, but got " & $args.len)
-          instr = Instr(kind: kind, args: args)
-    of nnkCurlyExpr, nnkBracketExpr:
-      if node.is_shape_access:
-        let tensor = ctx.lookup_tensor(node[0][0])
-        var dim = 0
-        if node[1].kind == nnkIntLit:
-          dim = int(node[1].int_val)
-          if dim < 0:
-            raise ParserError(msg: "Negative dimensions are not supported, use ^" & $abs(dim) & " for indexing from the end.")
-        elif node[1].kind in nnkCallKinds and
-             node[1].len == 2 and
-             node[1][0].is_name("^"):
-          assert node[1][1].kind == nnkIntLit
-          dim = -int(node[1][1].int_val)
-        else:
-          raise ParserError(msg: node.repr & " is not a valid dimension. Only int literals or backwards indices are allowed as dimensions.")
-        instr = Instr(kind: InstrShape, dim: dim, tensor: tensor)
-      elif is_main_expr:
-        var read = node.parse_tensor_op(ctx)
-        read.data = ctx.kernel.regs.alloc()
-        ctx.kernel.reads.add(read)
-        return read.data
-      else:
-        raise ParserError(msg: "Nested tensor operations are not allowed")
-    of nnkDotExpr:
-      assert node[1].is_name()
-      case node[1].str_val.nim_ident_normalize:
-        of "len":
-          assert node[0].is_name()
-          instr = Instr(kind: InstrLen,
-            tensor: ctx.lookup_tensor(node[0])
-          )
-        else: raise ParserError(msg: "Unable to parse expression from " & node.repr)
-    of nnkPar:
-      return node[0].parse_expr(instrs, ctx, is_main_expr)
-    of nnkStmtListExpr:
-      for stmt in node:
-        result = stmt.parse_expr(instrs, ctx, is_main_expr)
-      return
-    of nnkLetSection:
-      for def in node:
-        assert def.len == 3
-        if not def[0].is_name:
-          raise ParserError(msg: "Cannot assign to " & def[0].repr)
-        let
-          name = def[0].str_val.nim_ident_normalize()
-          value = def[2].parse_expr(instrs, ctx, is_main_expr)
-        ctx.indices[name] = value
-    else:
-      raise ParserError(msg: "Unable to parse expression from " & $node.kind)
+type
+  ExprKind* = enum
+    ExprInstr, ExprIter, ExprRead
   
-  result = ctx.kernel.regs.alloc()
-  instr.res = result
-  instrs.add(instr)
+  ExprBuilder* = ref object
+    children*: seq[ExprBuilder]
+    tensor*: Fun
+    res*: Table[int, RegId]
+    case kind*: ExprKind:
+      of ExprIter:
+        iter*: string
+      of ExprInstr:
+        case instr*: InstrKind:
+          of InstrIndex: index_lit*: int
+          of InstrScalar: scalar_lit*: float64
+          of InstrBoolean: boolean_lit*: bool
+          of InstrShape: dim*: int
+          else: discard
+      of ExprRead:
+        is_raw*: bool
+      else: discard
+  
+  Scalar* = distinct ExprBuilder
+  Index* = distinct ExprBuilder
+  Boolean* = distinct ExprBuilder
 
-proc parse_body(node: NimNode, ctx: var ParserContext): RegId
+proc literal(value: bool): Boolean =
+  result = Boolean(ExprBuilder(kind: ExprInstr, instr: InstrBoolean, boolean_lit: value))
 
+proc literal(value: int): Index =
+  result = Index(ExprBuilder(kind: ExprInstr, instr: InstrIndex, index_lit: value))
+
+proc literal(value: float64): Scalar =
+  result = Scalar(ExprBuilder(kind: ExprInstr, instr: InstrScalar, scalar_lit: value))
+
+proc iterator_literal(name: string): Index =
+  result = Index(ExprBuilder(kind: ExprIter, iter: name))
+
+#[
 proc parse_attribute(node: NimNode, ctx: var ParserContext) =
   case node.kind:
     of nnkCallKinds:
@@ -473,88 +300,195 @@ proc parse_body(node: NimNode, ctx: var ParserContext): RegId =
     node[2].parse_attribute(ctx)
   else:
     result = node.parse_expr(ctx.kernel.expr.instrs, ctx, true)
+]#
 
-proc `$`(fun: Fun): string =
-  if fun.is_nil:
-    result = "nil"
-  else:
-    result = "<fun>"
+proc clear*(builder: ExprBuilder) =
+  builder.res = init_table[int, RegId]()
+  for child in builder.children:
+    child.clear()
 
-proc ensure_init(fun: var Fun) =
-  if fun.is_nil:
-    fun = Fun(kind: FunResult)
-  if fun.args.len == 0:
-    fun.args[fun] = TensorId(1)
+type BuildContext = object
+  kernel: Kernel
+  tensors: Table[Fun, TensorId]
+  iters: Table[string, RegId]
+  block_count: int
 
-proc register_args(fun: Fun, args: openArray[(Fun, TensorId)]):
-    Table[TensorId, TensorId] =
-  for (arg, id) in args:
+proc alloc_block(ctx: var BuildContext): int =
+  result = ctx.block_count
+  ctx.block_count += 1
+
+proc lookup_tensor(ctx: var BuildContext, tensor: Fun): TensorId =
+  if tensor notin ctx.tensors:
+    ctx.tensors[tensor] = TensorId(ctx.tensors.len + 1)
+  result = ctx.tensors[tensor]
+
+proc build*(builder: ExprBuilder,
+            instrs: var seq[Instr],
+            block_id: int,
+            ctx: var BuildContext): RegId
+
+proc build_linear_index*(builder: ExprBuilder, ctx: var BuildContext): LinearIndex =
+  let reg = builder.build(result.setup, ctx.alloc_block(), ctx)
+  result.factors = to_table({reg: 1})
+
+proc build*(builder: ExprBuilder,
+            instrs: var seq[Instr],
+            block_id: int,
+            ctx: var BuildContext): RegId =
+  if block_id notin builder.res:
+    case builder.kind:
+      of ExprRead:
+        var dims: seq[LinearIndex] = @[]
+        for dim in builder.children:
+          dims.add(dim.build_linear_index(ctx))
+        
+        let res = ctx.kernel.regs.alloc()
+        ctx.kernel.reads.add(TensorOp(
+          tensor: ctx.lookup_tensor(builder.tensor),
+          is_raw: builder.is_raw,
+          dims: dims,
+          data: res
+        ))
+        builder.res[block_id] = res
+      of ExprIter:
+        if builder.iter notin ctx.iters:
+          let reg = ctx.kernel.regs.alloc()
+          ctx.iters[builder.iter] = reg
+          ctx.kernel.loops.add(Loop(iter: reg))
+        builder.res[block_id] = ctx.iters[builder.iter]
+      of ExprInstr:
+        var instr = Instr(kind: builder.instr)
+        for child in builder.children:
+          instr.args.add(child.build(instrs, block_id, ctx))
+        
+        if not builder.tensor.is_nil:
+          instr.tensor = ctx.lookup_tensor(builder.tensor)
+        
+        case builder.instr:
+          of InstrIndex: instr.index_lit = builder.index_lit
+          of InstrScalar: instr.scalar_lit = builder.scalar_lit
+          of InstrBoolean: instr.boolean_lit = builder.boolean_lit
+          of InstrShape: instr.dim = builder.dim
+          else: discard 
+        
+        instr.res = ctx.kernel.regs.alloc()
+        builder.res[block_id] = instr.res
+        instrs.add(instr)
+  
+  result = builder.res[block_id]
+
+proc build_expr(builder: ExprBuilder, ctx: var BuildContext): Expr =
+  result.res = builder.build(result.instrs, ctx.alloc_block(), ctx)
+
+proc register_args(fun: Fun, ctx: BuildContext) =
+  for arg, id in ctx.tensors:
     if arg notin fun.args:
-      fun.args[arg] = TensorId(fun.args.len + 1)
+      fun.args[arg] = id
       fun.children.add(arg)
-    result[id] = fun.args[arg]
 
-proc add_kernel(fun: Fun, kernel: Kernel, args: openArray[(Fun, TensorId)]) =
-  if fun.locked:
+proc add_kernel(target: Fun, dims: openArray[Index], is_raw: bool, value: Scalar) =
+  if target.locked:
     raise new_exception(ValueError, "Unable to add another kernel to a locked function")
-  let subs = fun.register_args(args)
-  kernel.substitute(subs)
-  fun.kernels.add(kernel)
+  if target.kind notin {FunResult, FunEffect}:
+    raise new_exception(ValueError, "Unable to add a kernel to " & $target.kind)
+  
+  var
+    kernel = Kernel()
+    ctx = BuildContext(kernel: kernel, tensors: target.args)
+  kernel.expr = ExprBuilder(value).build_expr(ctx)
+  kernel.write = TensorOp(
+    tensor: ctx.lookup_tensor(target),
+    is_raw: is_raw,
+    data: kernel.expr.res
+  )
+  for dim in dims:
+    kernel.write.dims.add(ExprBuilder(dim).build_linear_index(ctx))
+  target.kernels.add(kernel)
+  target.register_args(ctx)
 
-proc init_literal_instr(lit: int, res: RegId): Instr =
-  result = Instr(kind: InstrIndex, res: res, index_lit: lit)
+proc is_name(node: NimNode): bool =
+  result = node.kind == nnkIdent or node.kind == nnkSym
 
-proc init_literal_instr(lit: float64, res: RegId): Instr =
-  result = Instr(kind: InstrScalar, res: res, scalar_lit: lit)
+proc is_name(node: NimNode, name: string): bool =
+  result = node.is_name and nim_ident_normalize(node.str_val) == nim_ident_normalize(name)
 
-proc init_literal_instr(lit: bool, res: RegId): Instr =
-  result = Instr(kind: InstrBoolean, res: res, boolean_lit: lit)
+proc wrap_expr(node: NimNode, locals: var HashSet[string]): NimNode =
+  case node.kind:
+    of nnkSym, nnkIdent:
+      if node.str_val == "true" or node.str_val == "false":
+        result = new_call(bind_sym("literal"), node)
+      elif nim_ident_normalize(node.str_val) in locals:
+        result = node
+      else:
+        result = new_call(bind_sym("iterator_literal"), new_lit(node.str_val))
+    of nnkIntLit: result = new_call(bind_sym("literal"), node)
+    of nnkFloatLit: result = new_call(bind_sym("literal"), node)
+    of nnkCallKinds:
+      assert node.len > 0
+      if node[0].is_name("@"):
+        result = new_call(bind_sym("literal"), node[1])
+      else:
+        result = new_nim_node(node.kind)
+        result.add(node[0])
+        for it in 1..<node.len:
+          result.add(node[it].wrap_expr(locals))
+    of nnkBracketExpr, nnkCurlyExpr:
+      result = new_nim_node(node.kind)
+      result.add(node[0])
+      for it in 1..<node.len:
+        result.add(node[it].wrap_expr(locals))
+    of nnkLetSection:
+      for def in node:
+        for it in 0..<(def.len - 2):
+          assert def[it].is_name()
+          locals.incl(nim_ident_normalize(def[it].str_val))
+    else:
+      result = new_nim_node(node.kind)
+      for child in node:
+        result.add(child.wrap_expr(locals))
 
-proc new_lit(instr: Instr): NimNode =
-  if instr.kind == InstrExtern:
-    result = new_call(bind_sym("init_literal_instr"),
-      ident(instr.extern), new_lit(instr.res)
-    )
-  else:
-    template add_field(constr: NimNode, name: string, value: NimNode) =
-      constr.add(new_tree(nnkExprColonExpr, ident(name), value))
-    
-    result = new_tree(nnkObjConstr, bind_sym("Instr"))
-    result.add_field("kind", new_lit(instr.kind))
-    result.add_field("args", new_lit(instr.args))
-    result.add_field("res", new_lit(instr.res))
-    result.add_field("tensor", new_lit(instr.tensor))
-    case instr.kind:
-      of InstrIndex: result.add_field("index_lit", new_lit(instr.index_lit))
-      of InstrScalar: result.add_field("scalar_lit", new_lit(instr.scalar_lit))
-      of InstrBoolean: result.add_field("boolean_lit", new_lit(instr.boolean_lit))
-      of InstrShape: result.add_field("dim", new_lit(instr.dim))
-      else: discard
+macro quote_expr(expr: untyped): untyped =
+  var locals = init_hash_set[string]()
+  result = expr.wrap_expr(locals)
 
-proc gen_args(tensors: seq[NimNode]): NimNode =
-  result = new_nim_node(nnkBracket)
-  for it, node in tensors:
-    if not node.is_nil:
-      result.add(new_tree(nnkTupleConstr, [
-        node, new_lit(TensorId(it + 1))
-      ]))
+type TargetInfo = object
+  tensor: NimNode
+  dims: seq[NimNode]
+  is_raw: bool
+  define_tensor: bool
 
-macro `++=`*(target, value: untyped): untyped =
-  var ctx = ParserContext(kernel: Kernel())
-  let res = value.parse_body(ctx)
-  ctx.kernel.expr.res = res
-  let (write, new_var) = target.parse_write(res, ctx)
-  ctx.kernel.write = write
-  let write_name = ctx.tensors[write.tensor]
+proc parse_target(node: NimNode, locals: var HashSet[string]): TargetInfo =
+  case node.kind:
+    of nnkInfix:
+      assert node[0].is_name("*")
+      result.define_tensor = true
+      result.tensor = node[1]
+      assert node[2].kind in {nnkCurly, nnkBracket}
+      if node[2].kind == nnkCurly:
+        result.is_raw = true
+      for child in node[2]:
+        result.dims.add(child.wrap_expr(locals))
+    of nnkBracketExpr, nnkCurlyExpr:
+      result.tensor = node[0]
+      result.is_raw = node.kind == nnkCurlyExpr
+      for it in 1..<node.len:
+        result.dims.add(node[it].wrap_expr(locals))
+    else:
+      error("Invalid target: " & node.repr)
+
+macro `++=`*(target_node, value_node: untyped): untyped =
+  var locals = init_hash_set[string]()
+  let
+    target = target_node.parse_target(locals)
+    value = value_node.wrap_expr(locals)
+  
   result = new_stmt_list()
-  if new_var:
-    result.add(new_var_stmt(write_name, new_call(bind_sym("Fun"), new_nil_lit())))
-  result.add(new_call(bind_sym("ensure_init"), write_name))
-  result.add(new_call(bind_sym("add_kernel"),
-    write_name,
-    new_lit(ctx.kernel),
-    ctx.tensors.gen_args()
-  ))
+  if target.define_tensor:
+    result.add(new_var_stmt(target.tensor, new_call(bind_sym("Fun"), new_nil_lit())))
+  result.add(new_call(bind_sym("ensure_init"), target.tensor))
+  result.add(new_call(bind_sym("add_kernel"), [
+    target.tensor, new_tree(nnkBracket, target.dims), new_lit(target.is_raw), value
+  ]))
 
 proc use_shape(fun: Fun, shape: ShapeConstraint, args: openArray[(Fun, TensorId)]) =
   if fun.kind != FunResult:
@@ -569,23 +503,29 @@ proc copy_shape*(fun, src: Fun) =
     [(fun, TensorId(1)), (src, TensorId(2))]
   )
 
-macro with_shape*(target, dims: untyped): untyped =
-  if dims.kind != nnkBracket:
+proc use_shape(fun: Fun, dims: openArray[Index]) =
+  if fun.kind != FunResult:
+    raise ParserError(msg: "Cannot set shape of " & $fun.kind)
+  var
+    ctx = BuildContext(tensors: fun.args)
+    shape = ShapeConstraint(kind: ShapeDims)
+  for dim in dims:
+    shape.dims.add(ExprBuilder(dim).build_linear_index(ctx))
+  fun.register_args(ctx)
+  fun.shape_constr = shape
+
+macro with_shape*(target, dim_nodes: untyped): untyped =
+  if dim_nodes.kind != nnkBracket:
     raise ParserError(msg: "The second argument to with_shape must be of the format [dim0, dim1, ...]")
   
-  var
-    ctx = ParserContext(kernel: Kernel())
-    shape = ShapeConstraint(kind: ShapeDims)
-  for dim, child in dims:
-    var instrs: seq[Instr] = @[]
-    let res = child.parse_expr(instrs, ctx, true)
-    shape.dims.add(LinearIndex(factors: to_table({res: 1}), setup: instrs))
-  assert target.is_name()
-  shape.dest = ctx.lookup_tensor(target)
+  var dims = new_nim_node(nnkBracket)
+  for dim in dim_nodes:
+    var locals = init_hash_set[string]()
+    dims.add(dim.wrap_expr(locals))
   
   result = new_stmt_list([
     new_call(bind_sym("ensure_init"), target),
-    new_call(bind_sym("use_shape"), target, new_lit(shape), ctx.tensors.gen_args())
+    new_call(bind_sym("use_shape"), dims)
   ])
 
 macro layer*(fn: untyped): untyped =
