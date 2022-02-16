@@ -34,8 +34,8 @@ test "xor":
   
   let
     model = compile[float32](net)
-    train_x = new_tensor([2, 4], @[float32 0, 0, 0, 1, 1, 0, 1, 1])
-    train_y = new_tensor([1, 4], @[float32 0, 1, 1, 0])
+    train_x = new_tensor([4, 2], @[float32 0, 0, 0, 1, 1, 0, 1, 1])
+    train_y = new_tensor([4, 1], @[float32 0, 1, 1, 0])
   
   for it in 0..<2000:
     model.apply("train", {"x": train_x, "y": train_y})

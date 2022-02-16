@@ -19,12 +19,12 @@ import exprgrad
 import ../tools/test_framework
 
 test "matmul":
-  c*[x, y] ++= input("a")[it, y] * input("b")[x, it]
+  c*[y, x] ++= input("a")[y, it] * input("b")[it, x]
   let model = compile[float32](c.target("c"))
   block:
     let
-      a = new_tensor([3, 2], @[float32 1, 2, 3, 4, 5, 6])
-      b = new_tensor([2, 3], @[float32 1, 2, 3, 4, 5, 6])
+      a = new_tensor([2, 3], @[float32 1, 2, 3, 4, 5, 6])
+      b = new_tensor([3, 2], @[float32 1, 2, 3, 4, 5, 6])
     check model.call("c", {"a": a, "b": b}) == a * b
 
 test "relu":
@@ -33,8 +33,8 @@ test "relu":
   let model = compile[float32](outp.target("outp"))
   block:
     let
-      inp = new_tensor[float32]([3, 2], @[float32 0, -1, 10, -20, 0.1, -0.1])
-      outp = new_tensor[float32]([3, 2], @[float32 0, 0, 10, 0, 0.1, 0])
+      inp = new_tensor[float32]([2, 3], @[float32 0, -1, 10, -20, 0.1, -0.1])
+      outp = new_tensor[float32]([2, 3], @[float32 0, 0, 10, 0, 0.1, 0])
     check model.call("outp", {"inp": inp}) == outp
 
 test "mean_squared_error":
@@ -53,11 +53,12 @@ test "mean_squared_error":
     }) == new_tensor([1], @[float32 9 + 1 + 1 + 9])
 
 test "transpose":
-  b*[x, y] ++= input("a")[y, x]
+  b*[y, x] ++= input("a")[x, y]
   block:
     let
       model = compile[float32](b.target("b"))
-      a = new_tensor[float32]([3, 2], @[float32 1, 2, 3, 4, 5, 6])
+      a = new_tensor[float32]([2, 3], @[float32 1, 2, 3, 4, 5, 6])
+    
     check model.call("b", {"a": a}) == a.transpose()
 
 test "extern":
@@ -67,7 +68,7 @@ test "extern":
   proc test_with_factor(factor: float64) =
     let
       model = compile[float64](target(input("x") * factor, "y"))
-      x = new_tensor[float64]([3, 2], @[float64 1, 2, 3, 4, 5, 6])
+      x = new_tensor[float64]([2, 3], @[float64 1, 2, 3, 4, 5, 6])
     check model.call("y", {"x": x}) == x * factor
   
   for it in -2..2:
@@ -76,11 +77,11 @@ test "extern":
 test "xor":
   randomize(10)
   
-  hidden*[x, y] ++= input("x")[it, y] * param([4, 2])[x, it]
-  hidden[x, y] ++= param([4])[x]
+  hidden*[y, x] ++= input("x")[y, it] * param([2, 4])[it, x]
+  hidden[y, x] ++= param([4])[x]
   hidden_relu*{it} ++= select(hidden{it} <= 0.0, 0.1 * hidden{it}, hidden{it})
-  output*[x, y] ++= hidden_relu[it, y] * param([1, 4])[x, it]
-  output[x, y] ++= param([1])[x]
+  output*[y, x] ++= hidden_relu[y, it] * param([4, 1])[it, x]
+  output[y, x] ++= param([1])[x]
   output_sigmoid*{it} ++= 1.0 / (1.0 + exp(-output{it})) 
   let pred = output_sigmoid.target("predict")
   
@@ -92,14 +93,13 @@ test "xor":
   let model = compile[float32](net)
   
   let
-    train_x = new_tensor([2, 4], @[float32 0, 0, 0, 1, 1, 0, 1, 1])
-    train_y = new_tensor([1, 4], @[float32 0, 1, 1, 0])
+    train_x = new_tensor([4, 2], @[float32 0, 0, 0, 1, 1, 0, 1, 1])
+    train_y = new_tensor([4, 1], @[float32 0, 1, 1, 0])
   
   for epoch in 0..<1000:
     model.apply("train", {"x": train_x, "y": train_y})
   
   check squares(model.call("predict", {"x": train_x}) - train_y).sum() < 0.1
-
 
 test "custom_grad":
   let inp = input("inp")

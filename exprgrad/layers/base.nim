@@ -25,12 +25,12 @@ proc `*`*(a: Fun, factor: float64): Fun {.layer.} = result{it} ++= a{it} * @fact
 proc `/`*(a: Fun, factor: float64): Fun {.layer.} = result{it} ++= a{it} / @factor
 
 proc matmul*(a, b: Fun): Fun {.layer.} =
-  result[x, y] ++= a[it, y] * b[x, it]
+  result[y, x] ++= a[y, it] * b[it, x]
 
 proc `*`*(a, b: Fun): Fun = matmul(a, b)
 
 proc transpose*(mat: Fun): Fun {.layer.} =
-  result[x, y] ++= mat[y, x]
+  result[y, x] ++= mat[x, y]
 
 # Optimizers
 
@@ -55,13 +55,13 @@ proc adam*(param: var Fun, grad: Fun,
 # Losses
 
 proc mse*(a, b: Fun): Fun {.layer.} =
-  result[0] ++= sq(a{it} - b{it}) / to_scalar(a.shape[^1])
+  result[0] ++= sq(a{it} - b{it}) / to_scalar(a.shape[0])
 
 proc binary_cross_entropy*(pred, labels: Fun): Fun {.layer.} =
   result[0] ++= -(
     labels{it} * ln(pred{it}) +
     (1.0 - labels{it}) * ln(1.0 - pred{it})
-  ) / to_scalar(pred.shape[^1])
+  ) / to_scalar(pred.shape[0])
 
 proc cross_entropy*(pred, labels: Fun): Fun {.layer.} =
-  result[0] ++= -(labels{it} * ln(pred{it})) / to_scalar(pred.shape[^1])
+  result[0] ++= -(labels{it} * ln(pred{it})) / to_scalar(pred.shape[0])

@@ -18,10 +18,10 @@ import ../parser, ../dsl
 
 proc dense*(values: Fun, inp, outp: int, has_bias: bool = true): Fun {.layer.} =
   let weights = param([inp, outp])
-  result[x, y] ++= values[it, y] * weights[it, x]
+  result[y, x] ++= values[y, it] * weights[it, x]
   if has_bias:
     let bias = param([outp])
-    result[x, y] ++= bias[x]
+    result[y, x] ++= bias[x]
 
 proc relu*(inp: Fun): Fun {.layer.} =
   result{it} ++= select(inp{it} >= 0.0, inp{it}, 0.0)
@@ -43,44 +43,43 @@ proc sin*(inp: Fun): Fun {.layer.} =
   result{it} ++= sin(inp{it})
 
 proc conv2*(images, filters: Fun): Fun {.layer.} =
-  result[filter, x, y, image] ++=
-    images[chan, x + dx, y + dy, image] *
-    filters[chan, dx, dy, filter]
+  result[image, y, x, filter] ++=
+    images[image, y + dy, x + dx, chan] *
+    filters[filter, dy, dx, chan]
 
 proc conv2*(images: Fun, chans, w, h, filters: int): Fun =
-  let filters = param([chans, w, h, filters])
+  let filters = param([filters, h, w, chans])
   result = conv2(images, filters)
 
+proc max(x, y, z, w: Scalar): Scalar =
+  result = max(max(x, y), max(z, w))
+
 proc maxpool2*(images: Fun): Fun {.layer.} =
-  result[chan, x, y, image] ++= max(
-    max(
-      images[chan, 2 * x, 2 * y, image],
-      images[chan, 2 * x + 1, 2 * y, image]
-    ),
-    max(
-      images[chan, 2 * x, 2 * y + 1, image],
-      images[chan, 2 * x + 1, 2 * y + 1, image]
-    )
+  result[image, y, x, chan] ++= max(
+    images[image, y * 2, x * 2, chan],
+    images[image, y * 2 + 1, x * 2, chan],
+    images[image, y * 2, x * 2 + 1, chan],
+    images[image, y * 2 + 1, x * 2 + 1, chan]
   ) | custom_grad(
-    grad(images)[chan, x, y, image] ++= select(
-      images[chan, x, y, image] == result[chan, x / 2, y / 2, image],
-      grad(result)[chan, x / 2, y / 2, image],
+    grad(images)[image, y, x, chan] ++= select(
+      images[image, y, x, chan] == result[image, y / 2, x / 2, chan],
+      grad(result)[image, y / 2, x / 2, chan],
       0.0
     )
   )
   result.lock()
 
 proc avgpool2*(images: Fun): Fun {.layer.} =
-  result[chan, x, y, image] ++= (
-    images[chan, 2 * x, 2 * y, image] +
-    images[chan, 2 * x + 1, 2 * y, image] +
-    images[chan, 2 * x, 2 * y + 1, image] +
-    images[chan, 2 * x + 1, 2 * y + 1, image]
+  result[image, y, x, chan] ++= (
+    images[image, y * 2, x * 2, chan] +
+    images[image, y * 2 + 1, x * 2, chan] +
+    images[image, y * 2, x * 2 + 1, chan] +
+    images[image, y * 2 + 1, x * 2 + 1, chan]
   ) / 4.0
 
 proc upsample2*(images: Fun): Fun {.layer.} =
   # TODO
-  result[chan, x, y, image] ++= images[chan, x / 2, y / 2, image]
+  result[image, y, x, chan] ++= images[image, x / 2, y / 2, chan]
   result.with_shape([
     images.shape[0],
     images.shape[1] * 2,
@@ -90,9 +89,9 @@ proc upsample2*(images: Fun): Fun {.layer.} =
 
 proc softmax*(inp: Fun): Fun {.layer.} =
   var sums: Fun
-  sums[y] ++= exp(inp[x, y])
+  sums[y] ++= exp(inp[y, x])
   sums.name = "softmax.sums"
-  result[x, y] ++= exp(inp[x, y]) / sums[y]
+  result[y, x] ++= exp(inp[y, x]) / sums[y]
 
 proc dropout*(inp: Fun, prob: float64): Fun {.layer.} =
   let rand = rand(inp, 0.0..1.0)

@@ -28,8 +28,8 @@ let
   model = compile[float32](net)
 
 let
-  train_x = new_tensor([2, 4], @[float32 0, 0, 0, 1, 1, 0, 1, 1])
-  train_y = new_tensor([1, 4], @[float32 0, 1, 1, 0])
+  train_x = new_tensor([4, 2], @[float32 0, 0, 0, 1, 1, 0, 1, 1])
+  train_y = new_tensor([4, 1], @[float32 0, 1, 1, 0])
 
 for epoch in 0..<5000:
   model.apply("train", {"x": train_x, "y": train_y})

@@ -565,7 +565,7 @@ proc reorder_loops*(kernel: Kernel) =
         for reg_b, factor_b in op.dims[it].factors:
           if loop_iters[reg_a] != LoopId(0) and
              loop_iters[reg_b] != LoopId(0):
-            graph[int(loop_iters[reg_b]) - 1][kind].add(loop_iters[reg_a])
+            graph[int(loop_iters[reg_a]) - 1][kind].add(loop_iters[reg_b])
   
   const SCORE_VALS = [OpRead: 10, OpWrite: 1]
   var scores = new_seq[int](kernel.loops.len)
@@ -646,8 +646,10 @@ proc expand_tensor_index(dims: seq[LinearIndex],
   var
     stride = RegId(0)
     terms = new_seq[RegId]()
-  for it, dim in dims:
-    let dim_expr = dim.unfold(regs)
+  for it in countdown(dims.len - 1, 0):
+    let
+      dim = dims[it]
+      dim_expr = dim.unfold(regs)
     result.instrs.add(dim_expr.instrs)
     
     if stride == RegId(0):
@@ -660,7 +662,7 @@ proc expand_tensor_index(dims: seq[LinearIndex],
       ))
       terms.add(product)
     
-    if it != dims.len - 1:
+    if it != 0:
       let size = regs.alloc()
       result.instrs.add(Instr(kind: InstrShape,
         tensor: tensor, dim: it, res: size
@@ -978,9 +980,9 @@ type Matrix[T] = object
 
 {.push inline.}
 proc height(matrix: Matrix): int = matrix.data.len div matrix.width
-proc `[]`[T](matrix: Matrix[T], x, y: int): T = matrix.data[x + y * matrix.width]
-proc `[]`[T](matrix: var Matrix[T], x, y: int): var T = matrix.data[x + y * matrix.width]
-proc `[]=`[T](matrix: var Matrix[T], x, y: int, value: T) = matrix.data[x + y * matrix.width] = value
+proc `[]`[T](matrix: Matrix[T], y, x: int): T = matrix.data[x + y * matrix.width]
+proc `[]`[T](matrix: var Matrix[T], y, x: int): var T = matrix.data[x + y * matrix.width]
+proc `[]=`[T](matrix: var Matrix[T], y, x: int, value: T) = matrix.data[x + y * matrix.width] = value
 
 proc `$`[T](matrix: Matrix[T]): string =
   for y in 0..<matrix.height:
@@ -989,15 +991,15 @@ proc `$`[T](matrix: Matrix[T]): string =
     for x in 0..<matrix.width:
       if x != 0:
         result &= ", "
-      result &= $matrix[x, y]
+      result &= $matrix[y, x]
   result = "[" & result & "]"
 
 proc swap_rows[T](matrix: var Matrix[T], a, b: int) =
   for x in 0..<matrix.width:
-    swap(matrix[x, a], matrix[x, b])
+    swap(matrix[a, x], matrix[b, x])
 {.pop.}
 
-proc init_matrix[T](w, h: int): Matrix[T] =
+proc init_matrix[T](h, w: int): Matrix[T] =
   result = Matrix[T](width: w, data: new_seq[T](w * h))
 
 type Fraction = Rational[int]
@@ -1015,7 +1017,7 @@ proc solve(equations: seq[LinearIndex]): Table[RegId, Fraction] =
     raise new_exception(ValueError, "Underconstrained linear system")
   
   var
-    matrix = init_matrix[int](indices.len + 1, indices.len)
+    matrix = init_matrix[int](indices.len, indices.len + 1)
     known = init_hash_set[seq[Fraction]]()
     y = 0
   for equation in equations:
@@ -1041,7 +1043,7 @@ proc solve(equations: seq[LinearIndex]): Table[RegId, Fraction] =
     
     if normalized notin known:
       for x in 0..<matrix.width:
-        matrix[x, y] = row[x]
+        matrix[y, x] = row[x]
       known.incl(normalized)
       y += 1
       if y >= matrix.height:
@@ -1053,22 +1055,22 @@ proc solve(equations: seq[LinearIndex]): Table[RegId, Fraction] =
   for pivot in 0..<matrix.height:
     var max_row = pivot
     for y in (pivot + 1)..<matrix.height:
-      if abs(matrix[pivot, y]) > abs(matrix[pivot, max_row]):
+      if abs(matrix[y, pivot]) > abs(matrix[max_row, pivot]):
         max_row = y
     if max_row != pivot:
       matrix.swap_rows(max_row, pivot)
     let target = matrix[pivot, pivot]
     for y in (pivot + 1)..<matrix.height:
-      let cur = matrix[pivot, y]
+      let cur = matrix[y, pivot]
       if cur != 0:
         for x in 0..<matrix.width:
-          matrix[x, y] = matrix[x, y] * target - matrix[x, pivot] * cur
+          matrix[y, x] = matrix[y, x] * target - matrix[pivot, x] * cur
   
   var solutions = new_seq[Fraction](indices.len)
   for y in countdown(matrix.height - 1, 0):
-    var sum = matrix[indices.len, y] // 1
+    var sum = matrix[y, indices.len] // 1
     for x in (y + 1)..<indices.len:
-      sum -= solutions[x] * matrix[x, y]
+      sum -= solutions[x] * matrix[y, x]
     solutions[y] = sum / (matrix[y, y] // 1)
   
   for reg, index in indices:
@@ -1345,7 +1347,7 @@ proc choose_parallel*(program: Program) =
         var count = LOOP_COUNT[target.compile_target]
         for loop in kernel.loops.mitems:
           if loop.mode >= LoopIndependent:
-            loop.mode = LoopParallel 
+            loop.mode = LoopParallel
             count -= 1
           else:
             break # TODO: Reorder loops?
