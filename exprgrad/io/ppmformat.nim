@@ -18,13 +18,13 @@ import faststreams, ../tensors
 
 proc write_ppm*(stream: var WriteStream, image: Tensor[uint8]) =
   assert image.shape.len == 3
-  case image.shape[0]:
+  case image.shape[2]:
     of 1: stream.write("P5 ")
     of 3: stream.write("P6 ")
     else: raise new_exception(ValueError, "Invalid channel count")
   stream.write($image.shape[1])
   stream.write(' ')
-  stream.write($image.shape[2])
+  stream.write($image.shape[0])
   stream.write(" 255\n")
   for it in 0..<image.len:
     stream.write(image[it])

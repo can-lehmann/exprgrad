@@ -45,7 +45,7 @@ proc parse_idx*[T](stream: var ReadStream): Tensor[T] =
     raise new_exception(ValueError, "Invalid tensor type")
   let dim_count = stream.read_uint8()
   var shape = new_seq[int](dim_count)
-  for it in countdown(dim_count - 1, 0):
+  for it in 0..<int(dim_count):
     shape[it] = stream.read_int32()
   result = new_tensor[T](shape)
   for it in 0..<result.len:

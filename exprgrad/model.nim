@@ -290,13 +290,13 @@ proc fit*[T](model: Model[T],
              batch_size: int = 32) =
   if args.len == 0:
     raise new_exception(ValueError, "Model.fit requires at least one input tensor. Use Model.apply instead if the target has zero inputs.")
-  let batch_count = args[0][1].shape[^1] div batch_size
+  let batch_count = args[0][1].shape[0] div batch_size
   
   var input_shapes = new_seq[(TensorId, seq[int])](args.len)
   for it, (name, arg) in args:
     if name notin model.program.inputs:
       raise new_exception(ValueError, name & " is not an input to the model")
-    input_shapes[it] = (model.program.inputs[name], arg.shape[0..^2] & @[batch_size])
+    input_shapes[it] = (model.program.inputs[name], @[batch_size] & arg.shape[1..^1])
   
   let shapes = model.program.infer_shapes(target, input_shapes)
   model.alloc_shapes(target, shapes)
@@ -308,7 +308,7 @@ proc fit*[T](model: Model[T],
     let offset = batch_size * batch_id
     for it, (name, arg) in args:
       let id = model.program.inputs[name]
-      model.tensors[id] = arg.view_last(offset, batch_size)
+      model.tensors[id] = arg.view_first(offset, batch_size)
     
     discard model.call_jit(target)
     

@@ -14,7 +14,7 @@
 
 
 import std/[os, sugar, times]
-import exprgrad, exprgrad/[io/idxformat, layers/base, layers/dnn, io/dotgraph, io/serialize]
+import exprgrad, exprgrad/[io/idxformat, io/ppmformat, layers/base, layers/dnn, io/dotgraph, io/serialize]
 
 proc load_mnist[T](path: string):
     tuple[train_x, train_y, test_x, test_y: Tensor[T]] =
@@ -32,14 +32,14 @@ let (train_x, train_y, test_x, test_y) = load_mnist[float32]("data")
 
 let
   net = input("x")
-    .reshape([1, 28, 28, -1])
+    .reshape([-1, 28, 28, 1])
     .conv2(1, 5, 5, 8)
     .leaky_relu() # Move after maxpool2?
     .maxpool2()
     .conv2(8, 3, 3, 16)
     .leaky_relu()
     .maxpool2()
-    .reshape([16 * 5 * 5, -1])
+    .reshape([-1, 16 * 5 * 5])
     .dense(16 * 5 * 5, 10)
     .softmax()
     .target("predict")
