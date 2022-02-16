@@ -90,41 +90,41 @@ proc `{}=`*[T](tensor: Tensor[T], it: int, value: T) {.inline.} = tensor.data[it
 proc `[]`*[T](tensor: Tensor[T], it: int): var T {.inline.} = tensor.data[it]
 proc `[]=`*[T](tensor: Tensor[T], it: int, value: T) {.inline.} = tensor.data[it] = value
 
-proc `[]`*[T](tensor: Tensor[T], x, y: int): var T {.inline.} =
-  tensor.data[x + y * tensor.shape[0]]
-proc `[]=`*[T](tensor: Tensor[T], x, y: int, value: T) {.inline.} =
-  tensor.data[x + y * tensor.shape[0]] = value
+proc `[]`*[T](tensor: Tensor[T], y, x: int): var T {.inline.} =
+  tensor.data[x + y * tensor.shape[^1]]
+proc `[]=`*[T](tensor: Tensor[T], y, x: int, value: T) {.inline.} =
+  tensor.data[x + y * tensor.shape[^1]] = value
 
-proc `[]`*[T](tensor: Tensor[T], x, y, z: int): var T {.inline.} =
-  tensor.data[x + y * tensor.shape[0] + z * tensor.shape[1] * tensor.shape[0]]
-proc `[]=`*[T](tensor: Tensor[T], x, y, z: int, value: T) {.inline.} =
-  tensor.data[x + y * tensor.shape[0] + z * tensor.shape[1] * tensor.shape[0]] = value
+proc `[]`*[T](tensor: Tensor[T], z, y, x: int): var T {.inline.} =
+  tensor.data[x + y * tensor.shape[^1] + z * tensor.shape[^1] * tensor.shape[^2]]
+proc `[]=`*[T](tensor: Tensor[T], z, y, x: int, value: T) {.inline.} =
+  tensor.data[x + y * tensor.shape[^1] + z * tensor.shape[^1] * tensor.shape[^2]] = value
 
-proc `[]`*[T](tensor: Tensor[T], x, y, z, w: int): var T {.inline.} =
+proc `[]`*[T](tensor: Tensor[T], w, z, y, x: int): var T {.inline.} =
   tensor.data[
     x +
-    y * tensor.shape[0] +
-    z * tensor.shape[1] * tensor.shape[0] +
-    w * tensor.shape[2] * tensor.shape[1] * tensor.shape[0]
+    y * tensor.shape[^1] +
+    z * tensor.shape[^2] * tensor.shape[^1] +
+    w * tensor.shape[^3] * tensor.shape[^2] * tensor.shape[^1]
   ]
-proc `[]=`*[T](tensor: Tensor[T], x, y, z, w: int, value: T) {.inline.} =
+proc `[]=`*[T](tensor: Tensor[T], w, z, y, x: int, value: T) {.inline.} =
   tensor.data[
     x +
-    y * tensor.shape[0] +
-    z * tensor.shape[1] * tensor.shape[0] +
-    w * tensor.shape[2] * tensor.shape[1] * tensor.shape[0]
+    y * tensor.shape[^1] +
+    z * tensor.shape[^2] * tensor.shape[^1] +
+    w * tensor.shape[^3] * tensor.shape[^2] * tensor.shape[^1]
   ] = value
 
 proc stringify[T](tensor: Tensor[T], dim: int, index: var int): string =
-  if dim == 0:
+  if dim >= tensor.shape.len:
     result = $tensor.data[index]
     index += 1
   else:
     result = "["
-    for it in 0..<tensor.shape[dim - 1]:
+    for it in 0..<tensor.shape[dim]:
       if it != 0:
         result &= ", "
-      result &= tensor.stringify(dim - 1, index)
+      result &= tensor.stringify(dim + 1, index)
     result &= "]"
 
 proc `$`*[T](tensor: Tensor[T]): string =
@@ -132,7 +132,7 @@ proc `$`*[T](tensor: Tensor[T]): string =
     result = "nil"
   else:
     var index = 0
-    result = tensor.stringify(tensor.shape.len, index)
+    result = tensor.stringify(0, index)
 
 template define_elementwise(op) =
   proc op*[T](a, b: Tensor[T]): Tensor[T] =
@@ -220,18 +220,18 @@ proc `*`*[T](a, b: Tensor[T]): Tensor[T] =
   ## Matrix multiplication
   assert a.is_matrix and b.is_matrix
   assert a.shape[0] == b.shape[1]
-  result = new_tensor[T]([b.shape[0], a.shape[1]])
-  for y in 0..<result.shape[1]:
-    for it in 0..<a.shape[0]:
-      for x in 0..<result.shape[0]:
-        result[x, y] += a[it, y] * b[x, it]
+  result = new_tensor[T]([a.shape[0], b.shape[1]])
+  for y in 0..<result.shape[0]:
+    for it in 0..<a.shape[1]:
+      for x in 0..<result.shape[1]:
+        result[y, x] += a[y, it] * b[it, x]
 
 proc transpose*[T](tensor: Tensor[T]): Tensor[T] =
   assert tensor.is_matrix
   result = new_tensor[T]([tensor.shape[1], tensor.shape[0]])
-  for y in 0..<result.shape[1]:
-    for x in 0..<result.shape[0]:
-      result[x, y] = tensor[y, x]
+  for y in 0..<result.shape[0]:
+    for x in 0..<result.shape[1]:
+      result[y, x] = tensor[x, y]
 
 proc convert*[A, B](tensor: Tensor[A]): Tensor[B] =
   result = new_tensor[B](tensor.shape)
@@ -242,7 +242,7 @@ template convert*[A](tensor: Tensor[A], B: typedesc): Tensor[B] =
   convert[A, B](tensor)
 
 proc one_hot*[T](indices: Tensor[T], count: int): Tensor[T] =
-  result = new_tensor[T](@[count] & indices.shape.to_seq())
+  result = new_tensor[T](indices.shape.to_seq() & @[count])
   for it in 0..<indices.len:
     result.data[it * count + int(indices.data[it])] = T(1)
 
@@ -258,20 +258,20 @@ proc fill_rand*[T](tensor: Tensor[T], slice: HSlice[T, T]) {.inline.} =
   for it in 0..<tensor.len:
     tensor.data[it] = rand(slice)
 
-proc view_last*[T](tensor: Tensor[T], offset, size: int): Tensor[T] =
-  let stride = tensor.len div tensor.shape[^1]
+proc view_first*[T](tensor: Tensor[T], offset, size: int): Tensor[T] =
+  let stride = tensor.len div tensor.shape[0]
   result = Tensor[T](
     is_view: true,
-    shape: tensor.shape[0..^2] & @[size],
+    shape: @[size] & tensor.shape[1..^1],
     len: stride * size,
     data: cast[ptr UncheckedArray[T]](tensor.data[stride * offset].addr)
   )
 
-proc view_last*[T](tensor: Tensor[T], slice: HSlice[int, int]): Tensor[T] =
-  result = tensor.view_last(slice.a, slice.b - slice.a + 1)
+proc view_first*[T](tensor: Tensor[T], slice: HSlice[int, int]): Tensor[T] =
+  result = tensor.view_first(slice.a, slice.b - slice.a + 1)
 
 proc select_samples*[T](tensor: Tensor[T], idx: openArray[int]): Tensor[T] =
-  result = new_tensor[T](tensor.shape[0..^2] & @[idx.len])
+  result = new_tensor[T](@[idx.len] & tensor.shape[1..^1])
   let stride = result.len div idx.len
   for it, id in idx:
     copy_mem(
@@ -283,12 +283,12 @@ proc select_samples*[T](tensor: Tensor[T], idx: openArray[int]): Tensor[T] =
 proc select_random_samples*[T](tensor: Tensor[T], count: int): Tensor[T] =
   var idx = new_seq[int](count)
   for id in idx.mitems:
-    id = rand(0..<tensor.shape[^1])
+    id = rand(0..<tensor.shape[0])
   result = tensor.select_samples(idx)
 
 proc shuffle_xy*[T](x, y: Tensor[T]): tuple[x, y: Tensor[T]] =
-  assert x.shape[^1] == y.shape[^1]
-  var idx = new_seq[int](x.shape[^1])
+  assert x.shape[0] == y.shape[0]
+  var idx = new_seq[int](x.shape[0])
   for it in 0..<idx.len:
     idx[it] = it
   shuffle(idx)
@@ -298,19 +298,19 @@ proc shuffle_xy*[T](x, y: Tensor[T]): tuple[x, y: Tensor[T]] =
 proc shuffle_xy*[T](tensors: (Tensor[T], Tensor[T])): tuple[x, y: Tensor[T]] =
   result = shuffle_xy(tensors[0], tensors[1])
 
-proc concat_last*[T](a, b: Tensor[T]): Tensor[T] =
-  assert a.shape[0..^2] == b.shape[0..^2]
-  result = new_tensor[T](a.shape[0..^2] & @[a.shape[^1] + b.shape[^1]])
-  let stride = result.len div result.shape[^1]
-  for it in 0..<a.shape[^1]:
+proc concat_first*[T](a, b: Tensor[T]): Tensor[T] =
+  assert a.shape[1..^1] == b.shape[1..^1]
+  result = new_tensor[T](@[a.shape[0] + b.shape[0]] & a.shape[1..^1])
+  let stride = result.len div result.shape[0]
+  for it in 0..<a.shape[0]:
     copy_mem(
       result.data[it * stride].addr,
       a.data[it * stride].addr,
       stride * sizeof(T)
     )
-  for it in 0..<b.shape[^1]:
+  for it in 0..<b.shape[0]:
     copy_mem(
-      result.data[(it + a.shape[^1]) * stride].addr,
+      result.data[(it + a.shape[0]) * stride].addr,
       b.data[it * stride].addr,
       stride * sizeof(T)
     )
