@@ -1481,7 +1481,6 @@ proc nest_elementwise_map(kernel: Kernel, tensors: seq[TensorDef]) =
     iters.add(LinearIndex(factors: to_table({iter: 1})))
     kernel.loops.add(Loop(iter: iter, has_bounds: true))
     kernel.loops[^1].use_bounds(kernel.reads[0], dim, kernel.regs)
-  kernel.loops.reverse()
   kernel.reads[0].dims = iters
   kernel.write.dims = iters
 
