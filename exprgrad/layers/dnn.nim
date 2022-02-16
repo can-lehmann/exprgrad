@@ -14,7 +14,7 @@
 
 # Layers for building neural networks
 
-import ../parser
+import ../parser, ../dsl
 
 proc dense*(values: Fun, inp, outp: int, has_bias: bool = true): Fun {.layer.} =
   let weights = param([inp, outp])

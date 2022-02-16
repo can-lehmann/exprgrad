@@ -1,4 +1,4 @@
-version = "0.0.1"
+version = "0.0.2"
 author = "Can Joshua Lehmann"
 description = "An experimental deep learning framework"
 license = "Apache License 2.0"

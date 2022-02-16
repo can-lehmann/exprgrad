@@ -192,8 +192,8 @@ In addition to the basic operators `+`, `-`, `*`, `/`, `==`, `<`, `>`, `<=` and 
 | `min(a, b)`          | Returns the minimum of `a` and `b`                                |
 | `max(a, b)`          | Returns the maximum of `a` and `b`                                |
 | `select(cond, a, b)` | Returns `a` if `cond` is true else returns `b`                    |
-| `Scalar(x)`          | Converts `x` to a `Scalar` value                                  |
-| `Index(x)`           | Converts `x` to an `Index` value                                  |
+| `to_scalar(x)`       | Converts `x` to a `Scalar` value                                  |
+| `to_index(x)`        | Converts `x` to an `Index` value                                  |
 | `sin(x)`             | Returns the sine of `x`                                           |
 | `cos(x)`             | Returns the cosine of `x`                                         |
 | `exp(x)`             | Computes `e ^ x`                                                  |

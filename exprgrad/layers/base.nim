@@ -14,7 +14,7 @@
 
 # Layers used across many different disciplines
 
-import ../parser
+import ../parser, ../dsl
 
 proc `+`*(a, b: Fun): Fun {.layer.} = result{it} ++= a{it} + b{it}
 proc `-`*(a, b: Fun): Fun {.layer.} = result{it} ++= a{it} - b{it}
@@ -47,21 +47,21 @@ proc adam*(param: var Fun, grad: Fun,
   m{it} ++= m{it} * (@beta1 - 1.0) + (1.0 - @beta1) * grad{it}
   v{it} ++= v{it} * (@beta2 - 1.0) + (1.0 - @beta2) * sq(grad{it})
   param{it} ++= (
-    let m_hat = m{it} / (1.0 - pow(@beta1, Scalar(epoch())));
-    let v_hat = v{it} / (1.0 - pow(@beta2, Scalar(epoch())));
+    let m_hat = m{it} / (1.0 - pow(@beta1, to_scalar(epoch())));
+    let v_hat = v{it} / (1.0 - pow(@beta2, to_scalar(epoch())));
     -(@eta) * m_hat / (sqrt(v_hat) + @eps)
   )
 
 # Losses
 
 proc mse*(a, b: Fun): Fun {.layer.} =
-  result[0] ++= sq(a{it} - b{it}) / Scalar(a.shape[^1])
+  result[0] ++= sq(a{it} - b{it}) / to_scalar(a.shape[^1])
 
 proc binary_cross_entropy*(pred, labels: Fun): Fun {.layer.} =
   result[0] ++= -(
     labels{it} * ln(pred{it}) +
     (1.0 - labels{it}) * ln(1.0 - pred{it})
-  ) / Scalar(pred.shape[^1])
+  ) / to_scalar(pred.shape[^1])
 
 proc cross_entropy*(pred, labels: Fun): Fun {.layer.} =
-  result[0] ++= -(labels{it} * ln(pred{it})) / Scalar(pred.shape[^1])
+  result[0] ++= -(labels{it} * ln(pred{it})) / to_scalar(pred.shape[^1])

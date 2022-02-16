@@ -63,6 +63,9 @@ define_unop(Scalar, Scalar, ln, InstrLn)
 define_type(Index)
 define_number(Index)
 
+define_unop(Scalar, Index, to_index, InstrToIndex)
+define_unop(Index, Scalar, to_scalar, InstrToScalar)
+
 proc epoch*(): Index =
   result = Index(ExprBuilder(kind: ExprInstr, instr: InstrEpoch))
 
@@ -92,6 +95,11 @@ type TensorShape = object
 proc shape*(tensor: Fun): TensorShape =
   result = TensorShape(tensor: tensor)
 
+proc `^`*(index: Index): Index =
+  if ExprBuilder(index).kind != ExprInstr or ExprBuilder(index).instr != InstrIndex:
+    raise ParserError(msg: "Dimension must be constant")
+  return literal(-ExprBuilder(index).index_lit)
+
 proc `[]`*(shape: TensorShape, dim: Index): Index =
   if ExprBuilder(dim).kind != ExprInstr or ExprBuilder(dim).instr != InstrIndex:
     raise ParserError(msg: "Dimension must be constant")
@@ -109,3 +117,10 @@ proc len*(tensor: Fun): Index =
 
 proc sq*[T: Scalar | Index](x: T): T =
   result = x * x
+
+proc max*(x, y: Scalar): Scalar =
+  result = select(x > y, x, y)
+
+proc min*(x, y: Scalar): Scalar =
+  result = select(x < y, x, y)
+

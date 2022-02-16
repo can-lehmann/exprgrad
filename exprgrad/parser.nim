@@ -241,16 +241,16 @@ type
   Index* = distinct ExprBuilder
   Boolean* = distinct ExprBuilder
 
-proc literal(value: bool): Boolean =
+proc literal*(value: bool): Boolean =
   result = Boolean(ExprBuilder(kind: ExprInstr, instr: InstrBoolean, boolean_lit: value))
 
-proc literal(value: int): Index =
+proc literal*(value: int): Index =
   result = Index(ExprBuilder(kind: ExprInstr, instr: InstrIndex, index_lit: value))
 
-proc literal(value: float64): Scalar =
+proc literal*(value: float): Scalar =
   result = Scalar(ExprBuilder(kind: ExprInstr, instr: InstrScalar, scalar_lit: value))
 
-proc iterator_literal(name: string): Index =
+proc iterator_literal*(name: string): Index =
   result = Index(ExprBuilder(kind: ExprIter, iter: name))
 
 proc clear*(builder: ExprBuilder) =
@@ -427,10 +427,14 @@ proc wrap_expr(node: NimNode, locals: var HashSet[string]): NimNode =
       for it in 1..<node.len:
         result.add(node[it].wrap_expr(locals))
     of nnkLetSection:
+      result = new_nim_node(nnkLetSection)
       for def in node:
         for it in 0..<(def.len - 2):
           assert def[it].is_name()
           locals.incl(nim_ident_normalize(def[it].str_val))
+        result.add(new_tree(nnkIdentDefs, def[0..^3] & @[
+          def[^2], def[^1].wrap_expr(locals)
+        ]))
     else:
       result = new_nim_node(node.kind)
       for child in node:
@@ -563,7 +567,7 @@ macro with_shape*(target, dim_nodes: untyped): untyped =
   
   result = new_stmt_list([
     new_call(bind_sym("ensure_init"), target),
-    new_call(bind_sym("use_shape"), dims)
+    new_call(bind_sym("use_shape"), target, dims)
   ])
 
 macro layer*(fn: untyped): untyped =
