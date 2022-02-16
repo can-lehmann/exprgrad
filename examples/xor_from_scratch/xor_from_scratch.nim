@@ -17,12 +17,12 @@ import exprgrad
 randomize(10)
 
 # Layer 1
-hidden*[x, y] ++= input("x")[it, y] * param([4, 2])[x, it]
-hidden[x, y] ++= param([4])[x]
+hidden*[y, x] ++= input("x")[y, it] * param([2, 4])[it, x]
+hidden[y, x] ++= param([4])[x]
 hidden_relu*{it} ++= select(hidden{it} <= 0.0, 0.1 * hidden{it}, hidden{it})
 # Layer 2
-output*[x, y] ++= hidden_relu[it, y] * param([1, 4])[x, it]
-output[x, y] ++= param([1])[x]
+output*[y, x] ++= hidden_relu[y, it] * param([4, 1])[it, x]
+output[y, x] ++= param([1])[x]
 output_sigmoid*{it} ++= 1.0 / (1.0 + exp(-output{it})) 
 let pred = output_sigmoid.target("predict")
 
@@ -34,8 +34,8 @@ let net = loss.target("loss").backprop(optim).target("train") # Train
 let model = compile[float32](net)
 
 let
-  train_x = new_tensor([2, 4], @[float32 0, 0, 0, 1, 1, 0, 1, 1])
-  train_y = new_tensor([1, 4], @[float32 0, 1, 1, 0])
+  train_x = new_tensor([4, 2], @[float32 0, 0, 0, 1, 1, 0, 1, 1])
+  train_y = new_tensor([4, 1], @[float32 0, 1, 1, 0])
 
 for epoch in 0..<5000:
   model.apply("train", {"x": train_x, "y": train_y})

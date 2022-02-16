@@ -24,15 +24,15 @@ proc load_mnist*[T](path: string):
     test_y_path = path / "t10k-labels-idx1-ubyte"
     train_x_path = path / "train-images-idx3-ubyte"
     train_y_path = path / "train-labels-idx1-ubyte"
-  result.test_x = load_idx[uint8](test_x_path).reshape([28 * 28, -1]).convert(T).remap(0, 255, 0.1, 0.9)
+  result.test_x = load_idx[uint8](test_x_path).reshape([-1, 28 * 28]).convert(T).remap(0, 255, 0.1, 0.9)
   result.test_y = load_idx[uint8](test_y_path).one_hot(10).convert(T)
-  result.train_x = load_idx[uint8](train_x_path).reshape([28 * 28, -1]).convert(T).remap(0, 255, 0.1, 0.9)
+  result.train_x = load_idx[uint8](train_x_path).reshape([-1, 28 * 28]).convert(T).remap(0, 255, 0.1, 0.9)
   result.train_y = load_idx[uint8](train_y_path).one_hot(10).convert(T)
 
 let (train_x, train_y, test_x, test_y) = load_mnist[float32]("data")
 
 proc gen_loss(labels: Fun): Fun =
-  result[0] ++= sq(labels{it}) / Scalar(labels.shape[^1])
+  result[0] ++= sq(labels{it}) / to_scalar(labels.shape[^1])
 
 let
   gen = input("seed")
@@ -68,21 +68,21 @@ var epoch = 0
 while true:
   if epoch mod LOG_TIME == 0:
     model.call("gen", {
-      "seed": new_rand_tensor([32, 1], SEED_RANGE)
-    }).reshape([1, 28, -1]).remap(0, 1, 0, 255).convert(uint8).save_ppm("sample.ppm")
+      "seed": new_rand_tensor([1, 32], SEED_RANGE)
+    }).reshape([-1, 28, 1]).remap(0, 1, 0, 255).convert(uint8).save_ppm("sample.ppm")
   
   model.epoch += 1
   block train_discr:
     const COUNT = 32
     let
-      seed = new_rand_tensor([32, COUNT], SEED_RANGE)
-      samples = concat_last(
+      seed = new_rand_tensor([COUNT, 32], SEED_RANGE)
+      samples = concat_first(
         model.call("gen", {"seed": seed}),
         train_x.select_random_samples(COUNT)
       )
-      labels = concat_last(
-        new_tensor([1, COUNT], float32(1)),
-        new_tensor([1, COUNT], float32(0))
+      labels = concat_first(
+        new_tensor([COUNT, 1], float32(1)),
+        new_tensor([COUNT, 1], float32(0))
       )
     model.apply("fit.discr", {"samples": samples, "labels": labels})
     if epoch mod LOG_TIME == 0:
@@ -90,7 +90,7 @@ while true:
   
   block train_gen:
     const COUNT = 64
-    let seed = new_rand_tensor([32, COUNT], SEED_RANGE)
+    let seed = new_rand_tensor([COUNT, 32], SEED_RANGE)
     model.apply("fit.gen", {"seed": seed})
     if epoch mod LOG_TIME == 0:
       echo "Generator Loss: ", model.call("loss.gen", {"seed": seed})

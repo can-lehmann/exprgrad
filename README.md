@@ -20,8 +20,8 @@ let
   model = compile[float32](net)
 
 let
-  train_x = new_tensor([2, 4], @[float32 0, 0, 0, 1, 1, 0, 1, 1])
-  train_y = new_tensor([1, 4], @[float32 0, 1, 1, 0])
+  train_x = new_tensor([4, 2], @[float32 0, 0, 0, 1, 1, 0, 1, 1])
+  train_y = new_tensor([4, 1], @[float32 0, 1, 1, 0])
 
 for epoch in 0..<5000:
   model.apply("train", {"x": train_x, "y": train_y})
@@ -34,12 +34,12 @@ Instead we can also specify the same model in terms of scalar operations on tens
 
 ```nim
 # Layer 1
-hidden*[x, y] ++= input("x")[it, y] * param([4, 2])[x, it]
-hidden[x, y] ++= param([4])[x]
+hidden*[y, x] ++= input("x")[y, it] * param([2, 4])[it, x]
+hidden[y, x] ++= param([4])[x]
 hidden_relu*{it} ++= select(hidden{it} <= 0.0, 0.1 * hidden{it}, hidden{it})
 # Layer 2
-output*[x, y] ++= hidden_relu[it, y] * param([1, 4])[x, it]
-output[x, y] ++= param([1])[x]
+output*[y, x] ++= hidden_relu[y, it] * param([4, 1])[it, x]
+output[y, x] ++= param([1])[x]
 output_sigmoid*{it} ++= 1.0 / (1.0 + exp(-output{it})) 
 let pred = output_sigmoid.target("predict")
 
@@ -81,18 +81,18 @@ A simple program which multiplies two matrices looks like this:
 
 ```nim
 proc matmul(a, b: Fun): Fun =
-  result[x, y] ++= a[it, y] * b[x, it]
+  result[y, x] ++= a[y, it] * b[it, x]
 ```
 
 The same program in Nim would look like this:
 
 ```nim
 proc `*`*[T](a, b: Tensor[T]): Tensor[T] =
-  result = new_tensor[T]([b.shape[0], a.shape[1]])
-  for y in 0..<result.shape[1]:
-    for it in 0..<a.shape[0]:
-      for x in 0..<result.shape[0]:
-        result[x, y] += a[it, y] * b[x, it]
+  result = new_tensor[T]([a.shape[0], b.shape[1]])
+  for y in 0..<result.shape[0]:
+    for it in 0..<a.shape[1]:
+      for x in 0..<result.shape[1]:
+        result[y, x] += a[y, it] * b[it, x]
 ```
 
 As you can see, the program in exprgrad's domain-specific language is basically equivalent to the last line of the Nim program.
@@ -155,7 +155,7 @@ The argument to the `with_shape` macro must be of the form `[dim0, dim1, dim2, .
 
 ```nim
 proc upsample2*(images: Fun): Fun =
-  result[chan, x, y, image] ++= images[chan, x / 2, y / 2, image]
+  result[image, y, x, chan] ++= images[image, x / 2, y / 2, chan]
   result.with_shape([
     images.shape[0],
     images.shape[1] * 2,
@@ -234,7 +234,7 @@ Creates a new input with the given name.
 The sizes of static dimensions may be specified to enable compiler optimizations.
 If a shape is specified unknown dimensions should have the size `-1`.
 
-Example: `input("x", [1, 28, 28, -1])`
+Example: `input("x", [-1, 28, 28, 1])`
 
 ```nim
 proc target*(fun: Fun, name: string): Fun
@@ -277,7 +277,7 @@ Changes the shape of the given tensor.
 Each reshape may include at most one unknown dimension, which should have the value `-1`.
 The length of the tensor must stay constant.
 
-Example: `x.reshape([28 * 28, -1])`
+Example: `x.reshape([-1, 28 * 28])`
 
 ```nim
 proc cond*(branches: openArray[(string, Fun)],
