@@ -250,6 +250,10 @@ proc literal*(value: int): Index =
 proc literal*(value: float): Scalar =
   result = Scalar(ExprBuilder(kind: ExprInstr, instr: InstrScalar, scalar_lit: value))
 
+proc literal*(value: Index): Index = value
+proc literal*(value: Scalar): Scalar = value
+proc literal*(value: Boolean): Boolean = value
+
 proc iterator_literal*(name: string): Index =
   result = Index(ExprBuilder(kind: ExprIter, iter: name))
 

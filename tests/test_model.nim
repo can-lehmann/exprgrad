@@ -119,3 +119,21 @@ test "custom_grad":
     let tensor = new_tensor[float32]([2, 2], @[float32 1, 2, 3, 4])
     check model.call("identity", {"inp": tensor}) == tensor
     check model.call("grad", {"inp": tensor}) == tensor * 2
+
+test "dynamic_ast":
+  proc elementwise_pow(fun: Fun, n: int): Fun =
+    var prod = quote_expr(1.0)
+    for it in 0..<n:
+      prod = quote_expr(@prod * fun{it})
+    result{it} ++= @prod
+    result.copy_shape(fun)
+  
+  let x = new_tensor([3, 2], @[float32 1, 2, 3, 4, 5, 6])
+  var expected_y = new_tensor[float32]([3, 2], 1)
+  for n in 0..<2:
+    let
+      model = compile[float32](input("x").elementwise_pow(n).target("y"))
+      y = model.call("y", {"x": x})
+    check squares(y - expected_y).sum() < 0.001
+    for it in 0..<expected_y.len:
+      expected_y{it} *= x{it}
