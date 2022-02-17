@@ -69,10 +69,22 @@ define_unop(Index, Scalar, to_scalar, InstrToScalar)
 proc epoch*(): Index =
   result = Index(ExprBuilder(kind: ExprInstr, instr: InstrEpoch))
 
-proc select*[T: Index | Scalar | Boolean](cond: Boolean, a, b: T): T =
+proc select*[T: Index | Scalar | Boolean | Array](cond: Boolean, a, b: T): T =
   result = T(ExprBuilder(kind: ExprInstr,
     instr: InstrSelect,
     children: @[ExprBuilder(cond), ExprBuilder(a), ExprBuilder(b)]
+  ))
+
+proc get*[T](arr: Array[T], index: Index): T =
+  result = T(ExprBuilder(kind: ExprInstr,
+    instr: InstrArrayRead,
+    children: @[ExprBuilder(arr), ExprBuilder(index)]
+  ))
+
+proc len*[T](arr: Array[T]): Index =
+  result = Index(ExprBuilder(kind: ExprInstr,
+    instr: InstrArrayLen,
+    children: @[ExprBuilder(arr)]
   ))
 
 proc `[]`*(tensor: Fun, indices: varargs[Index]): Scalar =

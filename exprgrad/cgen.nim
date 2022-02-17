@@ -58,6 +58,7 @@ proc to_c(typ: Type, ctx: Context): string =
     of TypeBoolean: result = "char"
     of TypeIndex: result = nim_int_to_c()
     of TypeScalar: result = ctx.program.scalar_type.to_c()
+    of TypeArray: raise GeneratorError(msg: $typ.kind & " is not supported by the c generator.")
 
 template with_indent(ctx: Context, body: untyped): untyped =
   block:
@@ -140,7 +141,8 @@ proc to_c(instrs: seq[Instr], ctx: Context): string =
         result &= ") {\n" & body & "\n" & make_indent(ctx.indent) & "}"
         result &= " // " & $instr.loop_fuse_next
         continue
-      of InstrLog, InstrExtern, InstrThreads:
+      of InstrLog, InstrExtern, InstrThreads, 
+         InstrArray, InstrArrayLen, InstrArrayRead:
         raise GeneratorError(msg: "Unable to generate c source for " & $instr.kind)
     
     var stmt = ""

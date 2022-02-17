@@ -240,6 +240,7 @@ type
   Scalar* = distinct ExprBuilder
   Index* = distinct ExprBuilder
   Boolean* = distinct ExprBuilder
+  Array*[T] = distinct ExprBuilder
 
 proc literal*(value: bool): Boolean =
   result = Boolean(ExprBuilder(kind: ExprInstr, instr: InstrBoolean, boolean_lit: value))
@@ -253,6 +254,12 @@ proc literal*(value: float): Scalar =
 proc literal*(value: Index): Index = value
 proc literal*(value: Scalar): Scalar = value
 proc literal*(value: Boolean): Boolean = value
+
+proc array_literal*[T](values: varargs[T]): Array[T] =
+  let builder = ExprBuilder(kind: ExprInstr, instr: InstrArray)
+  for value in values:
+    builder.children.add(ExprBuilder(value))
+  result = Array[T](builder)
 
 proc iterator_literal*(name: string): Index =
   result = Index(ExprBuilder(kind: ExprIter, iter: name))
@@ -439,6 +446,14 @@ proc wrap_expr(node: NimNode, locals: var HashSet[string]): NimNode =
         result.add(new_tree(nnkIdentDefs, def[0..^3] & @[
           def[^2], def[^1].wrap_expr(locals)
         ]))
+    of nnkBracket:
+      result = new_call(bind_sym("array_literal"))
+      for child in node:
+        result.add(child.wrap_expr(locals))
+    of nnkDotExpr:
+      result = new_tree(node.kind, [
+        node[0].wrap_expr(locals), node[1]
+      ])
     else:
       result = new_nim_node(node.kind)
       for child in node:
@@ -553,8 +568,8 @@ proc use_shape(fun: Fun, dims: openArray[Index]) =
   if fun.kind != FunResult:
     raise ParserError(msg: "Cannot set shape of " & $fun.kind)
   var
-    ctx = BuildContext(tensors: fun.args)
-    shape = ShapeConstraint(kind: ShapeDims)
+    ctx = BuildContext(tensors: fun.args, kernel: Kernel())
+    shape = ShapeConstraint(kind: ShapeDims, dest: ctx.lookup_tensor(fun))
   for dim in dims:
     shape.dims.add(ExprBuilder(dim).build_linear_index(ctx))
   fun.register_args(ctx)

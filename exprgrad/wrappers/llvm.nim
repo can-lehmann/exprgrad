@@ -195,7 +195,7 @@ proc build_call*(builder: BuilderRef, fn: ValueRef, args: ptr ValueRef, num_args
 proc build_call2*(builder: BuilderRef, ty: TypeRef, fn: ValueRef, args: ptr ValueRef, num_args: cuint, name: cstring): ValueRef {.importc: "LLVMBuildCall2".}
 
 proc build_alloca*(builder: BuilderRef, ty: TypeRef, name: cstring): ValueRef {.importc: "LLVMBuildAlloca".}
-proc build_array_alloca*(builder: BuilderRef, ty: TypeRef, size: ValueRef, name: cstring): ValueRef {.importc: "LLVMBuildArrayAlloca".}
+proc build_array_alloca*(builder: BuilderRef, ty: TypeRef, val: ValueRef, name: cstring): ValueRef {.importc: "LLVMBuildArrayAlloca".}
 proc build_load*(builder: BuilderRef, pointer_val: ValueRef, name: cstring): ValueRef {.importc: "LLVMBuildLoad".}
 proc build_load2*(builder: BuilderRef, ty: TypeRef, pointer_val: ValueRef, name: cstring): ValueRef {.importc: "LLVMBuildLoad2".}
 proc build_store*(builder: BuilderRef, val, pointer_val: ValueRef): ValueRef {.importc: "LLVMBuildStore".}

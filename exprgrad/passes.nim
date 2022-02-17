@@ -64,6 +64,27 @@ proc infer_types(instrs: seq[Instr], regs: var seq[Register]) =
         ret_type = arg_type(0)
       of InstrShape, InstrLen, InstrShapeLen:
         ret_type = Type(kind: TypeIndex, count: 1)
+      of InstrArray:
+        for it in 1..<instr.args.len:
+          if arg_type(it) != arg_type(0):
+            raise TypeError(msg: "All items in array must be of the same type")
+        ret_type = Type(kind: TypeArray,
+          count: 1,
+          len: instr.args.len,
+          item: arg_type(0)
+        )
+      of InstrArrayLen:
+        if arg_type(0).kind != TypeArray:
+          raise TypeError(msg: "Argument to " & $instr.kind & " must be an array")
+        ret_type = Type(kind: TypeIndex, count: arg_type(0).count)
+      of InstrArrayRead:
+        if arg_type(0).kind != TypeArray:
+          raise TypeError(msg: "First argument to " & $instr.kind & " must be an array")
+        if arg_type(1).kind != TypeIndex:
+          raise TypeError(msg: "Second argument to " & $instr.kind & " must be an index")
+        if arg_type(0).count != arg_type(1).count:
+          raise TypeError() 
+        ret_type = arg_type(0).item
       of InstrRead, InstrWrite, InstrOverwrite:
         if instr.tensor == TensorId(0):
           raise TypeError(msg: $instr.kind & " must have a tensor argument")

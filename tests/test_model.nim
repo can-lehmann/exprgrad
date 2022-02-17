@@ -137,3 +137,13 @@ test "dynamic_ast":
     check squares(y - expected_y).sum() < 0.001
     for it in 0..<expected_y.len:
       expected_y{it} *= x{it}
+
+test "array":
+  y*[x] ++= (
+    let arr = [1.0, 2.0, 3.0];
+    arr.get(x) + to_scalar(arr.len)
+  )
+  y.with_shape([3])
+  
+  let model = compile[float32](y.target("y"))
+  check model.call("y", []) == new_tensor([3], @[float32 4, 5, 6])

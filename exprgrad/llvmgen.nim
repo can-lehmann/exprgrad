@@ -141,6 +141,7 @@ proc to_llvm(typ: Type, ctx: Context): TypeRef =
     of TypeIndex: result = nim_int_type()
     of TypeScalar: result = ctx.scalar_type()
     of TypeBoolean: result = int1_type()
+    of TypeArray: result = pointer_type(typ.item.to_llvm(ctx), 0)
 
 proc to_llvm(instrs: seq[Instr], ctx: Context) =
   let builder = ctx.builder
@@ -367,6 +368,36 @@ proc to_llvm(instrs: seq[Instr], ctx: Context) =
           [ctx.fn.get_param(0)],
           cstring("")
         )
+      of InstrArray:
+        let
+          array_type = ctx.kernel.regs[instr.res].typ
+          item_type = array_type.item.to_llvm(ctx)
+        res = builder.build_array_alloca(
+          array_type.item.to_llvm(ctx),
+          const_nim_int(instr.args.len),
+          cstring($instr.res)
+        )
+        for it, arg in instr.args:
+          let value_ptr = builder.build_gep2(
+            item_type,
+            res,
+            [const_nim_int(it)],
+            "array_value_ptr"
+          )
+          discard builder.build_store(ctx[arg], value_ptr)
+      of InstrArrayRead:
+        let
+          array_type = ctx.kernel.regs[instr.args[0]].typ
+          item_type = array_type.item.to_llvm(ctx)
+          value_ptr = builder.build_gep2(
+            item_type,
+            ctx[instr.args[0]],
+            [ctx[instr.args[1]]],
+            "array_value_ptr"
+          )
+        res = builder.build_load2(item_type, value_ptr, cstring($instr.res))
+      of InstrArrayLen:
+        res = const_nim_int(ctx.kernel.regs[instr.args[0]].typ.len)
       else:
         raise GeneratorError(msg: "Unable to generate LLVM IR for " & $instr.kind)
     

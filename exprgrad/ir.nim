@@ -34,10 +34,15 @@ type
   TensorId* = distinct int
   LoopId* = distinct int
   
-  TypeKind* = enum TypeScalar, TypeIndex, TypeBoolean
-  Type* = object
-    kind*: TypeKind
+  TypeKind* = enum TypeScalar, TypeIndex, TypeBoolean, TypeArray
+  Type* = ref object
     count*: int
+    case kind*: TypeKind:
+      of TypeArray:
+        len*: int
+        item*: Type
+      else:
+        discard
   
   InstrKind* = enum
     InstrIndex, InstrScalar, InstrBoolean,
@@ -48,6 +53,7 @@ type
     InstrEq, InstrLt, InstrLe, InstrSelect,
     InstrToScalar, InstrToIndex,
     InstrShape, InstrLen, InstrShapeLen,
+    InstrArray, InstrArrayLen, InstrArrayRead,
     InstrRead, InstrWrite, InstrOverwrite,
     InstrExtern, InstrEpoch,
     InstrLoop, InstrThreads
@@ -229,7 +235,23 @@ define_id(TensorId, TensorDef, "tensor", "TensorId")
 define_id(LoopId, Loop, "loop", "LoopId")
 
 proc `$`*(typ: Type): string =
-  result = ($typ.kind)[len("Type")..^1] & ":" & $typ.count
+  if typ.is_nil:
+    return "nil"
+  result = ($typ.kind)[len("Type")..^1]
+  case typ.kind:
+    of TypeArray:
+      result &= "[" & $typ.len & ", " & $typ.item & "]"
+    else: discard
+  if typ.count != 1:
+    result &= ":" & $typ.count
+
+proc `==`*(a, b: Type): bool =
+  if a.kind == b.kind and a.count == b.count:
+    case a.kind:
+      of TypeIndex, TypeScalar, TypeBoolean:
+        result = true
+      of TypeArray:
+        result = a.len == b.len and a.item == b.item
 
 proc `==`*(a, b: Instr): bool =
   if a.kind == b.kind:
