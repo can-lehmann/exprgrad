@@ -101,13 +101,14 @@ proc `*`*[T](a, b: Tensor[T]): Tensor[T] =
 As you can see, the program in exprgrad's domain-specific language is basically equivalent to the last line of the Nim program.
 The shape of the output tensor and the iteration ranges of all loops are inferred automatically.
 
-In contrast to Nim, exprgrad's type system is very simple as it includes only three types.
+In contrast to Nim, exprgrad's type system is very simple as it includes only four types.
 
-| Name      | Purpose                                            |
-| --------- | -------------------------------------------------- |
-| `Scalar`  | Floating point value. Is differentiable.           |
-| `Index`   | Integer value. Used to index into tensors.         |
-| `Boolean` | Boolean value. Only used in `select` instructions. |
+| Name       | Purpose                                            |
+| ---------- | -------------------------------------------------- |
+| `Scalar`   | Floating point value. Is differentiable.           |
+| `Index`    | Integer value. Used to index into tensors.         |
+| `Boolean`  | Boolean value. Only used in `select` instructions. |
+| `Array[T]` | Fixed size array with items of type T.             |
 
 Tensors may be accessed using the `[]` and `{}` operators.
 While `[]` allows you index into each dimension, `{}` gives you direct access to the data of the tensor.
@@ -139,7 +140,8 @@ There is no guarantee that both branches are executed.
 
 ```nim
 proc relu*(inp: Fun): Fun =
-  iters it: result{it} ++= select(inp{it} >= 0.0, inp{it}, 0.0)
+  iters it:
+    result{it} ++= select(inp{it} >= 0.0, inp{it}, 0.0)
 ```
 
 An expression may contain multiple statements separated using `;`.
@@ -209,6 +211,8 @@ In addition to the basic operators `+`, `-`, `*`, `/`, `==`, `<`, `>`, `<=` and 
 | `tensor.shape[dim]`  | Returns the size of dimension `dim` of `tensor`                   |
 | `tensor.len`         | Returns the length of `tensor`                                    |
 | `epoch()`            | Returns the current epoch stored in `Model.epoch`.                |
+| `arr.len`            | Returns the length of the given array.                            |
+| `arr[index]`         | Gets the element stored at `index` in the array.                  |
 
 If you cannot find the instruction you are looking for, please open an issue.
 
