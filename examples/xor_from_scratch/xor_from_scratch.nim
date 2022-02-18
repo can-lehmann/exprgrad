@@ -16,19 +16,21 @@ import std/random
 import exprgrad
 randomize(10)
 
-# Layer 1
-hidden*[y, x] ++= input("x")[y, it] * param([2, 4])[it, x]
-hidden[y, x] ++= param([4])[x]
-hidden_relu*{it} ++= select(hidden{it} <= 0.0, 0.1 * hidden{it}, hidden{it})
-# Layer 2
-output*[y, x] ++= hidden_relu[y, it] * param([4, 1])[it, x]
-output[y, x] ++= param([1])[x]
-output_sigmoid*{it} ++= 1.0 / (1.0 + exp(-output{it})) 
-let pred = output_sigmoid.target("predict")
+iters y, x, it:
+  # Layer 1
+  hidden*[y, x] ++= input("x")[y, it] * param([2, 4])[it, x]
+  hidden[y, x] ++= param([4])[x]
+  hidden_relu*{it} ++= select(hidden{it} <= 0.0, 0.1 * hidden{it}, hidden{it})
+  # Layer 2
+  output*[y, x] ++= hidden_relu[y, it] * param([4, 1])[it, x]
+  output[y, x] ++= param([1])[x]
+  output_sigmoid*{it} ++= 1.0 / (1.0 + exp(-output{it})) 
+  let pred = output_sigmoid.target("predict")
+  loss*[0] ++= sq(pred{it} - input("y"){it}) # Loss
 
 proc optim(param: var Fun, grad: Fun) =
-  param{it} ++= -0.1 * grad{it}
-loss*[0] ++= sq(pred{it} - input("y"){it}) # Loss
+  iters it: param{it} ++= -0.1 * grad{it}
+
 let net = loss.target("loss").backprop(optim).target("train") # Train
 
 let model = compile[float32](net)

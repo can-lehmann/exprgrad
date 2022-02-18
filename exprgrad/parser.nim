@@ -254,12 +254,13 @@ proc literal*(value: float): Scalar =
 proc literal*(value: Index): Index = value
 proc literal*(value: Scalar): Scalar = value
 proc literal*(value: Boolean): Boolean = value
+proc literal*[T](value: Array[T]): Array[T] = value
 
-proc array_literal*[T](values: varargs[T]): Array[T] =
+proc literal*[T](arr: openArray[T]): auto =
   let builder = ExprBuilder(kind: ExprInstr, instr: InstrArray)
-  for value in values:
-    builder.children.add(ExprBuilder(value))
-  result = Array[T](builder)
+  for value in arr.items:
+    builder.children.add(ExprBuilder(literal(value)))
+  result = Array[typeof(literal(arr[0]))](builder)
 
 proc iterator_literal*(name: string): Index =
   result = Index(ExprBuilder(kind: ExprIter, iter: name))
@@ -412,64 +413,13 @@ proc new_obj_constr(typ: NimNode, attrs: openArray[(string, NimNode)]): NimNode 
   for (name, value) in attrs:
     result.add(new_tree(nnkExprColonExpr, ident(name), value))
 
-proc wrap_expr(node: NimNode, locals: var HashSet[string]): NimNode =
-  case node.kind:
-    of nnkSym, nnkIdent:
-      if node.str_val == "true" or node.str_val == "false":
-        result = new_call(bind_sym("literal"), node)
-      elif nim_ident_normalize(node.str_val) in locals:
-        result = node
-      else:
-        result = new_call(bind_sym("iterator_literal"), new_lit(node.str_val))
-    of nnkIntLit: result = new_call(bind_sym("literal"), node)
-    of nnkFloatLit: result = new_call(bind_sym("literal"), node)
-    of nnkCallKinds:
-      assert node.len > 0
-      if node[0].is_name("@"):
-        result = new_call(bind_sym("literal"), node[1])
-      else:
-        result = new_nim_node(node.kind)
-        result.add(node[0])
-        for it in 1..<node.len:
-          result.add(node[it].wrap_expr(locals))
-    of nnkBracketExpr, nnkCurlyExpr:
-      result = new_nim_node(node.kind)
-      result.add(node[0])
-      for it in 1..<node.len:
-        result.add(node[it].wrap_expr(locals))
-    of nnkLetSection:
-      result = new_nim_node(nnkLetSection)
-      for def in node:
-        for it in 0..<(def.len - 2):
-          assert def[it].is_name()
-          locals.incl(nim_ident_normalize(def[it].str_val))
-        result.add(new_tree(nnkIdentDefs, def[0..^3] & @[
-          def[^2], def[^1].wrap_expr(locals)
-        ]))
-    of nnkBracket:
-      result = new_call(bind_sym("array_literal"))
-      for child in node:
-        result.add(child.wrap_expr(locals))
-    of nnkDotExpr:
-      result = new_tree(node.kind, [
-        node[0].wrap_expr(locals), node[1]
-      ])
-    else:
-      result = new_nim_node(node.kind)
-      for child in node:
-        result.add(child.wrap_expr(locals))
-
-macro quote_expr*(expr: untyped): untyped =
-  var locals = init_hash_set[string]()
-  result = expr.wrap_expr(locals)
-
 type TargetInfo = object
   tensor: NimNode
   dims: seq[NimNode]
   is_raw: bool
   define_tensor: bool
 
-proc parse_target(node: NimNode, locals: var HashSet[string]): TargetInfo =
+proc parse_target(node: NimNode): TargetInfo =
   case node.kind:
     of nnkInfix:
       assert node[0].is_name("*")
@@ -479,12 +429,12 @@ proc parse_target(node: NimNode, locals: var HashSet[string]): TargetInfo =
       if node[2].kind == nnkCurly:
         result.is_raw = true
       for child in node[2]:
-        result.dims.add(child.wrap_expr(locals))
+        result.dims.add(child)
     of nnkBracketExpr, nnkCurlyExpr:
       result.tensor = node[0]
       result.is_raw = node.kind == nnkCurlyExpr
       for it in 1..<node.len:
-        result.dims.add(node[it].wrap_expr(locals))
+        result.dims.add(node[it])
     else:
       error("Invalid target: " & node.repr)
 
@@ -512,18 +462,19 @@ proc gen_custom_grad(node: NimNode): NimNode =
   if node.kind != nnkInfix or not node[0].is_name("++=") or node.len != 3:
     raise ParserError(msg: "Custom gradient must be a valid kernel")
   
-  var locals = init_hash_set[string]()
   let
-    target = node[1].parse_target(locals)
-    (value_node, attrs) = node[2].remove_attributes()
-    value = value_node.wrap_expr(locals)
+    target = node[1].parse_target()
+    (value, attrs) = node[2].remove_attributes()
   
   result = gen_kernel_builder(target, value, attrs)
 
 proc gen_kernel_builder(target: TargetInfo, value: NimNode, attrs: seq[NimNode]): NimNode =
+  var dims: seq[NimNode] = @[]
+  for dim in target.dims:
+    dims.add(new_call(bind_sym("literal"), dim))
   result = new_obj_constr(bind_sym("KernelBuilder"), {
     "target": target.tensor,
-    "dims": new_call(bind_sym("@"), new_tree(nnkBracket, target.dims)),
+    "dims": new_call(bind_sym("@"), new_tree(nnkBracket, dims)),
     "is_raw": new_lit(target.is_raw),
     "value": value
   })
@@ -538,12 +489,34 @@ proc gen_kernel_builder(target: TargetInfo, value: NimNode, attrs: seq[NimNode])
       else:
         result = new_call(attr[0], @[result] & attr[1..^1])
 
+proc replace_iters(node: NimNode, iters: HashSet[string]): NimNode =
+  case node.kind:
+    of nnkSym, nnkIdent:
+      if nim_ident_normalize(node.str_val) in iters:
+        result = new_call(bind_sym("iterator_literal"), new_lit(node.str_val))
+      else:
+        result = node
+    of nnkCharLit..nnkUint64Lit,
+       nnkFloatLit..nnkFloat64Lit,
+       nnkStrLit..nnkTripleStrLit,
+       nnkCommentStmt:
+      result = node
+    else:
+      result = new_nim_node(node.kind)
+      for child in node:
+        result.add(child.replace_iters(iters))
+
+macro iters*(args: varargs[untyped]): untyped =
+  var iters = init_hash_set[string]()
+  for it in 0..<(args.len - 1):
+    assert args[it].is_name
+    iters.incl(args[it].str_val)
+  result = args[^1].replace_iters(iters)
+
 macro `++=`*(target_node, body_node: untyped): untyped =
-  var locals = init_hash_set[string]()
   let
-    target = target_node.parse_target(locals)
-    (value_node, attrs) = body_node.remove_attributes()
-    value = value_node.wrap_expr(locals)
+    target = target_node.parse_target()
+    (value, attrs) = body_node.remove_attributes()
   
   result = new_stmt_list()
   if target.define_tensor:
@@ -581,8 +554,7 @@ macro with_shape*(target, dim_nodes: untyped): untyped =
   
   var dims = new_nim_node(nnkBracket)
   for dim in dim_nodes:
-    var locals = init_hash_set[string]()
-    dims.add(dim.wrap_expr(locals))
+    dims.add(new_call(bind_sym("literal"), dim))
   
   result = new_stmt_list([
     new_call(bind_sym("ensure_init"), target),

@@ -19,7 +19,7 @@ import exprgrad
 import ../tools/test_framework
 
 test "matmul":
-  c*[y, x] ++= input("a")[y, it] * input("b")[it, x]
+  iters y, x, it: c*[y, x] ++= input("a")[y, it] * input("b")[it, x]
   let model = compile[float32](c.target("c"))
   block:
     let
@@ -29,7 +29,7 @@ test "matmul":
 
 test "relu":
   var inp = input("inp")
-  outp*{it} ++= select(0.0 < inp{it}, inp{it}, 0.0)
+  iters it: outp*{it} ++= select(0.0 < inp{it}, inp{it}, 0.0)
   let model = compile[float32](outp.target("outp"))
   block:
     let
@@ -38,7 +38,7 @@ test "relu":
     check model.call("outp", {"inp": inp}) == outp
 
 test "mean_squared_error":
-  loss*[0] ++= sq(input("pred"){it} - input("labels"){it})
+  iters it: loss*[0] ++= sq(input("pred"){it} - input("labels"){it})
   let model = compile[float32](loss.target("loss"))
   block:
     let
@@ -53,7 +53,7 @@ test "mean_squared_error":
     }) == new_tensor([1], @[float32 9 + 1 + 1 + 9])
 
 test "transpose":
-  b*[y, x] ++= input("a")[x, y]
+  iters y, x: b*[y, x] ++= input("a")[x, y]
   block:
     let
       model = compile[float32](b.target("b"))
@@ -63,7 +63,8 @@ test "transpose":
 
 test "extern":
   proc `*`(inp: Fun, factor: float64): Fun =
-    result{it} ++= inp{it} * @factor
+    iters it:
+      result{it} ++= inp{it} * factor
   
   proc test_with_factor(factor: float64) =
     let
@@ -77,18 +78,19 @@ test "extern":
 test "xor":
   randomize(10)
   
-  hidden*[y, x] ++= input("x")[y, it] * param([2, 4])[it, x]
-  hidden[y, x] ++= param([4])[x]
-  hidden_relu*{it} ++= select(hidden{it} <= 0.0, 0.1 * hidden{it}, hidden{it})
-  output*[y, x] ++= hidden_relu[y, it] * param([4, 1])[it, x]
-  output[y, x] ++= param([1])[x]
-  output_sigmoid*{it} ++= 1.0 / (1.0 + exp(-output{it})) 
-  let pred = output_sigmoid.target("predict")
-  
-  proc optim(param: var Fun, grad: Fun) =
-    param{it} ++= -0.1 * grad{it}
-  loss*[0] ++= sq(pred{it} - input("y"){it})
-  let net = loss.target("loss").backprop(optim).target("train")
+  iters y, x, it:
+    hidden*[y, x] ++= input("x")[y, it] * param([2, 4])[it, x]
+    hidden[y, x] ++= param([4])[x]
+    hidden_relu*{it} ++= select(hidden{it} <= 0.0, 0.1 * hidden{it}, hidden{it})
+    output*[y, x] ++= hidden_relu[y, it] * param([4, 1])[it, x]
+    output[y, x] ++= param([1])[x]
+    output_sigmoid*{it} ++= 1.0 / (1.0 + exp(-output{it})) 
+    let pred = output_sigmoid.target("predict")
+    
+    proc optim(param: var Fun, grad: Fun) =
+      param{it} ++= -0.1 * grad{it}
+    loss*[0] ++= sq(pred{it} - input("y"){it})
+    let net = loss.target("loss").backprop(optim).target("train")
   
   let model = compile[float32](net)
   
@@ -103,9 +105,10 @@ test "xor":
 
 test "custom_grad":
   let inp = input("inp")
-  identity*{x} ++= inp{x} | custom_grad(
-    grad(inp){x} ++= inp{x} * 2.0 * grad(identity){x}
-  )
+  iters x:
+    identity*{x} ++= inp{x} | custom_grad(
+      grad(inp){x} ++= inp{x} * 2.0 * grad(identity){x}
+    )
   
   let
     graph = identity
@@ -122,10 +125,10 @@ test "custom_grad":
 
 test "dynamic_ast":
   proc elementwise_pow(fun: Fun, n: int): Fun =
-    var prod = quote_expr(1.0)
+    var prod: Scalar = 1.0
     for it in 0..<n:
-      prod = quote_expr(@prod * fun{it})
-    result{it} ++= @prod
+      iters it: prod = prod * fun{it}
+    iters it: result{it} ++= prod
     result.copy_shape(fun)
   
   let x = new_tensor([3, 2], @[float32 1, 2, 3, 4, 5, 6])
@@ -139,11 +142,26 @@ test "dynamic_ast":
       expected_y{it} *= x{it}
 
 test "array":
-  y*[x] ++= (
-    let arr = [1.0, 2.0, 3.0];
-    arr.get(x) + to_scalar(arr.len)
+  iters x: res*[x] ++= (
+    let arr = literal([1.0, 2.0, 3.0]);
+    arr[x] + to_scalar(arr.len)
   )
-  y.with_shape([3])
+  res.with_shape([3])
   
-  let model = compile[float32](y.target("y"))
+  let model = compile[float32](res.target("y"))
   check model.call("y", []) == new_tensor([3], @[float32 4, 5, 6])
+
+test "nested_array":
+  iters x, y: res*[y, x] ++= (
+    let arr = literal([
+      [1.0, 2.0, 3.0],
+      [4.0, 5.0, 6.0],
+      [7.0, 8.0, 9.0]
+    ]);
+    arr[y][x]
+  )
+  res.with_shape([3, 3])
+  
+  let model = compile[float32](res.target("y"))
+  check model.call("y", []) == new_tensor([3, 3], @[float32 1, 2, 3, 4, 5, 6, 7, 8, 9])
+

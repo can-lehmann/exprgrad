@@ -16,7 +16,7 @@
 
 import ir, parser
 
-export Scalar, Index, Boolean
+export Scalar, Index, Boolean, literal
 
 template define_binop(ArgType, ResultType: typedesc, op, instr_kind: untyped) =
   proc op*(a, b: ArgType): ResultType =
@@ -75,7 +75,7 @@ proc select*[T: Index | Scalar | Boolean | Array](cond: Boolean, a, b: T): T =
     children: @[ExprBuilder(cond), ExprBuilder(a), ExprBuilder(b)]
   ))
 
-proc get*[T](arr: Array[T], index: Index): T =
+proc `[]`*[T](arr: Array[T], index: Index): T =
   result = T(ExprBuilder(kind: ExprInstr,
     instr: InstrArrayRead,
     children: @[ExprBuilder(arr), ExprBuilder(index)]
@@ -107,18 +107,18 @@ type TensorShape = object
 proc shape*(tensor: Fun): TensorShape =
   result = TensorShape(tensor: tensor)
 
-proc `^`*(index: Index): Index =
-  if ExprBuilder(index).kind != ExprInstr or ExprBuilder(index).instr != InstrIndex:
-    raise ParserError(msg: "Dimension must be constant")
-  return literal(-ExprBuilder(index).index_lit)
-
-proc `[]`*(shape: TensorShape, dim: Index): Index =
-  if ExprBuilder(dim).kind != ExprInstr or ExprBuilder(dim).instr != InstrIndex:
-    raise ParserError(msg: "Dimension must be constant")
+proc `[]`*(shape: TensorShape, dim: int): Index =
   result = Index(ExprBuilder(
     kind: ExprInstr, instr: InstrShape,
     tensor: shape.tensor,
-    dim: ExprBuilder(dim).index_lit
+    dim: dim
+  ))
+
+proc `[]`*(shape: TensorShape, dim: BackwardsIndex): Index =
+  result = Index(ExprBuilder(
+    kind: ExprInstr, instr: InstrShape,
+    tensor: shape.tensor,
+    dim: -int(dim)
   ))
 
 proc len*(shape: TensorShape): Index =
@@ -136,3 +136,6 @@ proc max*(x, y: Scalar): Scalar =
 proc min*(x, y: Scalar): Scalar =
   result = select(x < y, x, y)
 
+converter to_boolean*(x: bool): Boolean = literal(x)
+converter to_index*(x: int): Index = literal(x)
+converter to_scalar*(x: float): Scalar = literal(x)
