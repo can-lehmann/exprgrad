@@ -61,6 +61,32 @@ test "transpose":
     
     check model.call("b", {"a": a}) == a.transpose()
 
+test "max":
+  iters it:
+    let x = input("x")
+    res*{it} ++= max(x{it}, input("y"){it})
+    res.copy_shape(x)
+  
+  let model = compile[float32](res.target("z"))
+  check model.call("z", {
+    "x": new_tensor([3, 2], @[float32 1, 0, 3, 4, -10, 6]),
+    "y": new_tensor([3, 2], @[float32 1, 2, -3, 2, 5, 5.5])
+  }) == new_tensor([3, 2], @[float32 1, 2, 3, 4, 5, 6])
+
+test "shape":
+  iters:
+    let inp = input("x")
+    res*[0] ++= to_scalar(inp.shape[0])
+    res[1] ++= to_scalar(inp.shape[^2])
+    res[2] ++= to_scalar(inp.shape[^1])
+    res[3] ++= to_scalar(inp.shape.len)
+    res[4] ++= to_scalar(inp.len)
+    res.with_shape([5])
+  
+  let model = compile[float64](res.target("y"))
+  check model.call("y", {"x": new_tensor([1, 2, 3, 4], 0.0)}) == new_tensor([5], @[float64 1, 3, 4, 4, 24])
+  check model.call("y", {"x": new_tensor([2, 3], 0.0)}) == new_tensor([5], @[float64 2, 2, 3, 2, 6])
+
 test "extern":
   proc `*`(inp: Fun, factor: float64): Fun =
     iters it:
