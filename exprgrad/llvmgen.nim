@@ -255,6 +255,11 @@ proc to_llvm(instrs: seq[Instr], ctx: Context) =
           const_nim_int(int(instr.tensor)),
           const_nim_int(instr.dim)
         ], cstring($instr.res))
+      of InstrShapeLen:
+        res = builder.build_call2(ctx.builtin.shape_len_signature(), ctx.builtin.shape_len, [
+          ctx.fn.get_param(0),
+          const_nim_int(int(instr.tensor))
+        ], cstring($instr.res))
       of InstrEpoch:
         res = builder.build_call2(ctx.builtin.epoch_signature(),
           ctx.builtin.epoch, [ctx.fn.get_param(0)], cstring($instr.res)
