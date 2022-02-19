@@ -15,6 +15,7 @@ tests/test_model
 tests/test_serialize
 tests/test_json
 tests/test_dnn
+tests/test_csv
 tests/data.bin
 old/
 data.bin
