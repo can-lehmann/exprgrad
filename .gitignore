@@ -18,4 +18,6 @@ tests/test_dnn
 tests/test_csv
 tests/data.bin
 old/
+docs/assets/social-banner/
 data.bin
+

@@ -75,6 +75,11 @@ proc new_rand_tensor*[T](shape: openArray[int], slice: HSlice[T, T]): Tensor[T] 
   for it in 0..<result.shape.prod:
     result.data[it] = rand(slice)
 
+proc clone*[T](tensor: Tensor[T]): Tensor[T] =
+  result = Tensor[T]()
+  result.alloc_shape(tensor.shape)
+  copy_mem(result.data[0].addr, tensor.data[0].addr, sizeof(T) * tensor.len)
+
 proc data_ptr*[T](tensor: Tensor[T]): ptr UncheckedArray[T] {.inline.} = tensor.data
 
 proc `==`*[T](a, b: Tensor[T]): bool =

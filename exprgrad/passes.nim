@@ -26,7 +26,7 @@ proc infer_types(instrs: seq[Instr], regs: var seq[Register]) =
       of InstrIndex: ret_type = Type(kind: TypeIndex, count: 1)
       of InstrScalar: ret_type = Type(kind: TypeScalar, count: 1)
       of InstrBoolean: ret_type = Type(kind: TypeBoolean, count: 1)
-      of InstrAdd, InstrSub, InstrMul, InstrDiv,
+      of InstrAdd, InstrSub, InstrMul,
          InstrEq, InstrLe, InstrLt:
         let (a, b) = (arg_type(0), arg_type(1))
         if a != b:
@@ -35,6 +35,14 @@ proc infer_types(instrs: seq[Instr], regs: var seq[Register]) =
           of InstrEq, InstrLe, InstrLt:
             ret_type = Type(kind: TypeBoolean, count: a.count)
           else: ret_type = a
+      of InstrDiv:
+        if arg_type(0).kind != TypeScalar or arg_type(0).kind != TypeScalar:
+          raise TypeError(msg: "Arguments of " & $instr.kind & " must be of type Scalar.")
+        ret_type = arg_type(0)
+      of InstrIndexDiv, InstrMod, InstrWrap:
+        if arg_type(0).kind != TypeIndex or arg_type(0).kind != TypeIndex:
+          raise TypeError(msg: "Arguments of " & $instr.kind & " must be of type Index.")
+        ret_type = arg_type(0)
       of InstrNegate:
         if arg_type(0).kind notin {TypeScalar, TypeIndex}:
           raise TypeError(msg: "Argument to " & $instr.kind & " must be a Scalar or an Index")

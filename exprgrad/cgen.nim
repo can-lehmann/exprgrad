@@ -32,6 +32,9 @@ const NAMES = [
   InstrSub: "-",
   InstrMul: "*",
   InstrDiv: "/",
+  InstrIndexDiv: "/",
+  InstrMod: "%",
+  InstrWrap: "",
   InstrNegate: "-",
   InstrSin: "sin",
   InstrCos: "cos",
@@ -74,6 +77,7 @@ proc to_c(instrs: seq[Instr], ctx: Context): string =
       of InstrScalar: expr = $instr.scalar_lit
       of InstrBoolean: expr = $ord(instr.boolean_lit)
       of InstrAdd, InstrSub, InstrMul, InstrDiv,
+         InstrIndexDiv, InstrMod,
          InstrEq, InstrLt, InstrLe:
         let
           op = NAMES[instr.kind]
@@ -142,7 +146,8 @@ proc to_c(instrs: seq[Instr], ctx: Context): string =
         result &= " // " & $instr.loop_fuse_next
         continue
       of InstrLog, InstrExtern, InstrThreads, 
-         InstrArray, InstrArrayLen, InstrArrayRead:
+         InstrArray, InstrArrayLen, InstrArrayRead,
+         InstrWrap:
         raise GeneratorError(msg: "Unable to generate c source for " & $instr.kind)
     
     var stmt = ""

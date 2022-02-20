@@ -65,8 +65,8 @@ proc maxpool2*(images: Fun): Fun {.layer.} =
       images[image, y * 2 + 1, x * 2 + 1, chan]
     ) | custom_grad(
       grad(images)[image, y, x, chan] ++= select(
-        images[image, y, x, chan] == result[image, y / 2, x / 2, chan],
-        grad(result)[image, y / 2, x / 2, chan],
+        images[image, y, x, chan] == result[image, y div 2, x div 2, chan],
+        grad(result)[image, y div 2, x div 2, chan],
         0.0
       )
     )
@@ -84,13 +84,13 @@ proc avgpool2*(images: Fun): Fun {.layer.} =
 proc upsample2*(images: Fun): Fun {.layer.} =
   # TODO
   iters image, y, x, chan:
-    result[image, y, x, chan] ++= images[image, x / 2, y / 2, chan]
-    result.with_shape([
-      images.shape[0],
-      images.shape[1] * 2,
-      images.shape[2] * 2,
-      images.shape[3]
-    ])
+    result[image, y, x, chan] ++= images[image, x div 2, y div 2, chan]
+  result.with_shape([
+    images.shape[0],
+    images.shape[1] * 2,
+    images.shape[2] * 2,
+    images.shape[3]
+  ])
 
 proc softmax*(inp: Fun): Fun {.layer.} =
   iters y, x:

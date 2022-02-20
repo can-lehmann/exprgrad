@@ -40,7 +40,6 @@ template define_number(Type: typedesc) {.dirty.} =
   define_binop(Type, Type, `+`, InstrAdd)
   define_binop(Type, Type, `-`, InstrSub)
   define_binop(Type, Type, `*`, InstrMul)
-  define_binop(Type, Type, `/`, InstrDiv)
   define_unop(Type, Type, `-`, InstrNegate)
   
   define_binop(Type, Boolean, `<`, InstrLt)
@@ -50,6 +49,7 @@ define_type(Boolean)
 
 define_type(Scalar)
 define_number(Scalar)
+define_binop(Scalar, Scalar, `/`, InstrDiv)
 define_unop(Scalar, Scalar, sin, InstrSin)
 define_unop(Scalar, Scalar, cos, InstrCos)
 define_unop(Scalar, Scalar, exp, InstrExp)
@@ -62,6 +62,9 @@ define_unop(Scalar, Scalar, ln, InstrLn)
 
 define_type(Index)
 define_number(Index)
+define_binop(Index, Index, `div`, InstrIndexDiv)
+define_binop(Index, Index, `mod`, InstrMod)
+define_binop(Index, Index, wrap, InstrWrap)
 
 define_unop(Scalar, Index, to_index, InstrToIndex)
 define_unop(Index, Scalar, to_scalar, InstrToScalar)

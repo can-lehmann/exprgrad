@@ -162,7 +162,7 @@ The argument to the `with_shape` macro must be of the form `[dim0, dim1, dim2, .
 ```nim
 proc upsample2*(images: Fun): Fun =
   iters image, y, x, chan:
-    result[image, y, x, chan] ++= images[image, x / 2, y / 2, chan]
+    result[image, y, x, chan] ++= images[image, x div 2, y div 2, chan]
   result.with_shape([
     images.shape[0],
     images.shape[1] * 2,
@@ -192,7 +192,7 @@ More examples can be found in the `exprgrad/layers/base.nim` and `exprgrad/layer
 
 #### Instructions
 
-In addition to the basic operators `+`, `-`, `*`, `/`, `==`, `<`, `>`, `<=` and `>=`, the following instructions are supported:
+In addition to the basic operators `+`, `-`, `*`, `/`, `div`, `mod`, `==`, `<`, `>`, `<=` and `>=`, the following instructions are supported:
 
 | Instruction          | Description                                                       | 
 | -------------------- | ----------------------------------------------------------------- |
@@ -208,6 +208,7 @@ In addition to the basic operators `+`, `-`, `*`, `/`, `==`, `<`, `>`, `<=` and 
 | `ln(x)`              | Computes the natural logarithm of `x`                             |
 | `pow(a, b)`          | Computes `a ^ b`                                                  |
 | `sqrt(x)`            | Computes the square root of `x`                                   |
+| `wrap(x, y)`         | Computes `(x mod y + y) mod y` (`∈ [0, y) ∩ ℤ`)                   |
 | `tensor.shape[dim]`  | Returns the size of dimension `dim` of `tensor`                   |
 | `tensor.len`         | Returns the length of `tensor`                                    |
 | `epoch()`            | Returns the current epoch stored in `Model.epoch`.                |

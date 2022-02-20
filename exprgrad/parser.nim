@@ -501,6 +501,10 @@ proc replace_iters(node: NimNode, iters: HashSet[string]): NimNode =
        nnkStrLit..nnkTripleStrLit,
        nnkCommentStmt:
       result = node
+    of nnkDotExpr:
+      result = new_tree(nnkDotExpr, node[0].replace_iters(iters), node[1])
+    of nnkExprColonExpr:
+      result = new_tree(nnkExprColonExpr, node[0], node[1].replace_iters(iters))
     else:
       result = new_nim_node(node.kind)
       for child in node:

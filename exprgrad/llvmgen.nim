@@ -172,7 +172,13 @@ proc to_llvm(instrs: seq[Instr], ctx: Context) =
       of InstrAdd: generic_op(binop, build_nsw_add, build_fadd)
       of InstrSub: generic_op(binop, build_nsw_sub, build_fsub)
       of InstrMul: generic_op(binop, build_nsw_mul, build_fmul)
-      of InstrDiv: generic_op(binop, build_sdiv, build_fdiv)
+      of InstrDiv: binop(build_fdiv)
+      of InstrIndexDiv: binop(build_sdiv)
+      of InstrMod: binop(build_srem)
+      of InstrWrap:
+        res = builder.build_srem(ctx[instr.args[0]], ctx[instr.args[1]], cstring($instr.res & "_mod"))
+        res = builder.build_add(res, ctx[instr.args[1]], cstring($instr.res & "_offset"))
+        res = builder.build_srem(res, ctx[instr.args[1]], cstring($instr.res))
       of InstrNegate: generic_op(unop, build_negate, build_fnegate)
       of InstrSelect:
         res = builder.build_select(

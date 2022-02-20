@@ -47,6 +47,7 @@ type
   InstrKind* = enum
     InstrIndex, InstrScalar, InstrBoolean,
     InstrAdd, InstrSub, InstrMul, InstrDiv,
+    InstrIndexDiv, InstrMod, InstrWrap,
     InstrNegate, InstrSin, InstrCos,
     InstrExp, InstrPow, InstrSqrt,
     InstrLog, InstrLog10, InstrLog2, InstrLn,
