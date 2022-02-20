@@ -33,14 +33,11 @@ template loop(iter: untyped, start, stop: int, step: static[int], body: untyped)
     body
     {.emit: "}".}
   else:
-    let
-      start_copy = start
-      stop_copy = stop
     when step == 1:
-      for iter in start_copy..<stop_copy:
+      for iter in start..<stop:
         body
     else:
-      for iter in countup(start_copy, stop_copy - 1, step):
+      for iter in countup(start, stop - 1, step):
         body
 
 proc conv2_naive[T](image, filters: Tensor[T]): Tensor[T] =

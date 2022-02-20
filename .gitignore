@@ -10,8 +10,8 @@ examples/gan/data/
 examples/gan/gan
 examples/gan/model.*
 examples/gan/sample.ppm
-benchmarks/experiments/conv2
-benchmarks/experiments/nimcache
+benchmarks/conv2/conv2
+benchmarks/conv2/nimcache
 tests/test_tensors
 tests/test_model
 tests/test_serialize
