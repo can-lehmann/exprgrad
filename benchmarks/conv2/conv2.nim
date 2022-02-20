@@ -64,10 +64,10 @@ proc conv2_naive_specialized[T](image, filters: Tensor[T], fc, fh, fw, chans: st
     iw = image.shape[1]
     rw = result.shape[1]
   loop(y, 0, result.shape[0], 1):
-    loop(filter, 0, fc, 1):
-      loop(dy, 0, fh, 1):
-        loop(x, 0, rw, 1):
-          loop(dx, 0, fw, 1):
+    loop(dy, 0, fh, 1):
+      loop(x, 0, rw, 1):
+        loop(dx, 0, fw, 1):
+          loop(filter, 0, fc, 1):
             loop(chan, 0, chans, 1):
               result.data[y * fc * rw + x * fc + filter] +=
                 image.data[(y + dy) * chans * iw + (x + dx) * chans + chan] *
@@ -99,14 +99,17 @@ proc conv2_tiled_specialized[T](image, filters: Tensor[T], fc, fh, fw, chans: st
     iw = image.shape[1]
     rh = result.shape[0]
     rw = result.shape[1]
-  const TILE_SIZE = 128
-  loop(filter, 0, fc, 1):
-    loop(ty, 0, rh, TILE_SIZE):
-      loop(tx, 0, rw, TILE_SIZE):
-        loop(y, ty, min(ty + TILE_SIZE, rh), 1):
-          loop(dy, 0, fh, 1):
-            loop(x, tx, min(tx + TILE_SIZE, rw), 1):
-              loop(dx, 0, fw, 1):
+  const
+    TILE_SIZE_X = 2048
+    TILE_SIZE_Y = 32
+  
+  loop(ty, 0, rh, TILE_SIZE_Y):
+    loop(tx, 0, rw, TILE_SIZE_X):
+      loop(y, ty, min(ty + TILE_SIZE_Y, rh), 1):
+        loop(dy, 0, fh, 1):
+          loop(x, tx, min(tx + TILE_SIZE_X, rw), 1):
+            loop(dx, 0, fw, 1):
+              loop(filter, 0, fc, 1):
                 loop(chan, 0, chans, 1):
                   result.data[y * fc * rw + x * fc + filter] +=
                     image.data[(y + dy) * chans * iw + (x + dx) * chans + chan] *
@@ -185,10 +188,149 @@ proc conv2_c_specialized(image, filters: Tensor[float64]): Tensor[float64] =
   else:
     raise new_exception(ValueError, "")
 
+proc conv2_c_specialized_reorder(image, filters: Tensor[float64], fc, fh, fw, chans: static[cint]): Tensor[float64] =
+  result = new_tensor[float64]([
+    image.shape[0] - int(fh) + 1,
+    image.shape[1] - int(fw) + 1,
+    int(fc)
+  ])
+  {.emit: ["double* restrict image_data = ", image.data_ptr, ";"].}
+  {.emit: ["double* restrict filters_data = ", filters.data_ptr, ";"].}
+  {.emit: ["double* restrict result_data = ", result.data_ptr, ";"].}
+  {.emit: ["int iw = ", image.shape[1], ", ih = ", image.shape[0], ";"].}
+  {.emit: ["int rw = ", result.shape[1], ", rh = ", result.shape[0], ";"].}
+  {.emit: ["""
+    for (int y = 0; y < rh; y++) {
+      for (int x = 0; x < rw; x++) {
+        double* restrict region_data = &image_data[y * """, chans, """ * iw + x * """, chans, """];
+        for (int filter = 0; filter < """, fc, """; filter++) {
+          double acc = 0;
+          double* restrict filter_data = &filters_data[filter * """, chans, """ * """, fw, """ * """, fh, """];
+          for (int dy = 0; dy < """, fh, """; dy++) {
+            for (int dx = 0; dx < """, fw, """; dx++) {
+              for (int chan = 0; chan < """, chans, """; chan++) {
+                acc +=
+                  region_data[dy * """, chans, """ * iw + dx * """, chans, """ + chan] *
+                  filter_data[dy * """, chans, """ * """, fw, """ + dx * """, chans, """ + chan];
+              }
+            }
+          }
+          result_data[y * """, fc, """ * rw + x * """, fc, """ + filter] = acc;
+        }
+      }
+    }
+  """].}
+
+proc conv2_c_specialized_reorder(image, filters: Tensor[float64]): Tensor[float64] =
+  if filters.shape == @[16, 3, 3, 8]:
+    return conv2_c_specialized_reorder(image, filters, 16, 3, 3, 8)
+  elif filters.shape == @[1, 3, 3, 1]:
+    return conv2_c_specialized_reorder(image, filters, 1, 3, 3, 1)
+  elif filters.shape == @[8, 3, 3, 8]:
+    return conv2_c_specialized_reorder(image, filters, 8, 3, 3, 8)
+  else:
+    raise new_exception(ValueError, "")
+
+
+proc conv2_c_tiled_specialized(image, filters: Tensor[float64], fc, fh, fw, chans: static[cint]): Tensor[float64] =
+  result = new_tensor[float64]([
+    image.shape[0] - int(fh) + 1,
+    image.shape[1] - int(fw) + 1,
+    int(fc)
+  ])
+  const
+    TILE_SIZE_X = cint(2048)
+    TILE_SIZE_Y = cint(32)
+  {.emit: ["double* restrict image_data = ", image.data_ptr, ";"].}
+  {.emit: ["double* restrict filters_data = ", filters.data_ptr, ";"].}
+  {.emit: ["double* restrict result_data = ", result.data_ptr, ";"].}
+  {.emit: ["int iw = ", image.shape[1], ", ih = ", image.shape[0], ";"].}
+  {.emit: ["int rw = ", result.shape[1], ", rh = ", result.shape[0], ";"].}
+  {.emit: ["""
+    for (int ty = 0; ty < rh; ty += """, TILE_SIZE_Y, """) {
+      for (int tx = 0; tx < rw; tx += """, TILE_SIZE_X, """) {
+        for (int y = ty; y < rh && y < ty + """, TILE_SIZE_Y, """; y++) {
+          for (int dy = 0; dy < """, fh, """; dy++) {
+            for (int x = tx; x < rw && x < tx + """, TILE_SIZE_X, """; x++) {
+              for (int dx = 0; dx < """, fw, """; dx++) {
+                for (int filter = 0; filter < """, fc, """; filter++) {
+                  for (int chan = 0; chan < """, chans, """; chan++) {
+                    result_data[y * """, fc, """ * rw + x * """, fc, """ + filter] +=
+                      image_data[(y + dy) * """, chans, """ * iw + (x + dx) * """, chans, """ + chan] *
+                      filters_data[filter * """, chans, """ * """, fw, """ * """, fh, """ + dy * """, chans, """ * """, fw, """ + dx * """, chans, """ + chan];
+                  }
+                }
+              }  
+            }
+          }
+        }
+      }
+    }
+  """].}
+
+proc conv2_c_tiled_specialized(image, filters: Tensor[float64]): Tensor[float64] =
+  if filters.shape == @[16, 3, 3, 8]:
+    return conv2_c_tiled_specialized(image, filters, 16, 3, 3, 8)
+  elif filters.shape == @[1, 3, 3, 1]:
+    return conv2_c_tiled_specialized(image, filters, 1, 3, 3, 1)
+  elif filters.shape == @[8, 3, 3, 8]:
+    return conv2_c_tiled_specialized(image, filters, 8, 3, 3, 8)
+  else:
+    raise new_exception(ValueError, "")
+
+proc conv2_c_tiled_specialized_reorder(image, filters: Tensor[float64], fc, fh, fw, chans: static[cint]): Tensor[float64] =
+  result = new_tensor[float64]([
+    image.shape[0] - int(fh) + 1,
+    image.shape[1] - int(fw) + 1,
+    int(fc)
+  ])
+  const
+    TILE_SIZE_X = cint(2048)
+    TILE_SIZE_Y = cint(32)
+  {.emit: ["double* restrict image_data = ", image.data_ptr, ";"].}
+  {.emit: ["double* restrict filters_data = ", filters.data_ptr, ";"].}
+  {.emit: ["double* restrict result_data = ", result.data_ptr, ";"].}
+  {.emit: ["int iw = ", image.shape[1], ", ih = ", image.shape[0], ";"].}
+  {.emit: ["int rw = ", result.shape[1], ", rh = ", result.shape[0], ";"].}
+  {.emit: ["""
+    for (int ty = 0; ty < rh; ty += """, TILE_SIZE_Y, """) {
+      for (int tx = 0; tx < rw; tx += """, TILE_SIZE_X, """) {
+        for (int y = ty; y < rh && y < ty + """, TILE_SIZE_Y, """; y++) {
+          for (int x = tx; x < rw && x < tx + """, TILE_SIZE_X, """; x++) {
+            for (int filter = 0; filter < """, fc, """; filter++) {
+              double acc = 0;
+              for (int dy = 0; dy < """, fh, """; dy++) {
+                for (int dx = 0; dx < """, fw, """; dx++) {
+                  for (int chan = 0; chan < """, chans, """; chan++) {
+                    acc +=
+                      image_data[(y + dy) * """, chans, """ * iw + (x + dx) * """, chans, """ + chan] *
+                      filters_data[filter * """, chans, """ * """, fw, """ * """, fh, """ + dy * """, chans, """ * """, fw, """ + dx * """, chans, """ + chan];
+                  }
+                }
+              }
+              result_data[y * """, fc, """ * rw + x * """, fc, """ + filter] = acc;
+            }
+          }
+        }
+      }
+    }
+  """].}
+
+proc conv2_c_tiled_specialized_reorder(image, filters: Tensor[float64]): Tensor[float64] =
+  if filters.shape == @[16, 3, 3, 8]:
+    return conv2_c_tiled_specialized_reorder(image, filters, 16, 3, 3, 8)
+  elif filters.shape == @[1, 3, 3, 1]:
+    return conv2_c_tiled_specialized_reorder(image, filters, 1, 3, 3, 1)
+  elif filters.shape == @[8, 3, 3, 8]:
+    return conv2_c_tiled_specialized_reorder(image, filters, 8, 3, 3, 8)
+  else:
+    raise new_exception(ValueError, "")
+
+
 proc measure[T](conv2: proc (images, filters: Tensor[T]): Tensor[T],
-                image_shape: openArray[int] = [240 * 16, 320 * 16, 1],
-                filters_shape: openArray[int] = [1, 3, 3, 1],
-                sample_count: int = 2,
+                image_shape: openArray[int] = [240 * 4, 320 * 4, 8],
+                filters_shape: openArray[int] = [8, 3, 3, 8],
+                sample_count: int = 4,
                 fail_threshold: float64 = 0.1): Duration =
   for sample in 0..<sample_count:
     let
@@ -215,3 +357,7 @@ echo "conv2_tiled_specialized: ", measure[float64](conv2_tiled_specialized)
 echo "conv2_exprgrad: ", measure[float64](conv2_exprgrad)
 echo "conv2_exprgrad_specialized: ", measure[float64](conv2_exprgrad_specialized)
 echo "conv2_c_specialized: ", measure[float64](conv2_c_specialized)
+echo "conv2_c_tiled_specialized: ", measure[float64](conv2_c_tiled_specialized)
+echo "conv2_c_tiled_specialized_reorder: ", measure[float64](conv2_c_tiled_specialized_reorder)
+echo "conv2_c_specialized_reorder: ", measure[float64](conv2_c_specialized_reorder)
+
