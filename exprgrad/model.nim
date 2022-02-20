@@ -265,10 +265,11 @@ proc call_jit[T](model: Model[T], target: string): Tensor[T] =
   let output = model.program.targets[target].output
   if int(output) != 0:
     result = model.tensors[output]
+    model.tensors[output] = nil
 
 proc call*[T](model: Model[T],
               target: string,
-              args: openArray[(string, Tensor[T])]): Tensor[T] =
+              args: openArray[(string, Tensor[T])] = []): Tensor[T] =
   var input_shapes = new_seq[(TensorId, seq[int])](args.len)
   for it, (name, tensor) in args:
     if name notin model.program.inputs:
@@ -281,7 +282,7 @@ proc call*[T](model: Model[T],
 
 proc apply*[T](model: Model[T],
                target: string,
-               args: openArray[(string, Tensor[T])]) =
+               args: openArray[(string, Tensor[T])] = []) =
   discard model.call(target, args)
 
 proc fit*[T](model: Model[T],
