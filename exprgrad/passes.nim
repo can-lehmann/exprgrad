@@ -573,7 +573,7 @@ proc generate*(program: Program) =
                 setup: @[
                   Instr(kind: InstrLen, tensor: kernel.generator.tensor, res: RegId(1)),
                   Instr(kind: InstrIndex, index_lit: prod, res: RegId(2)),
-                  Instr(kind: InstrDiv, args: @[RegId(1), RegId(2)], res: RegId(3))
+                  Instr(kind: InstrIndexDiv, args: @[RegId(1), RegId(2)], res: RegId(3))
                 ],
                 factors: to_table({RegId(3): 1})
               ))
@@ -1134,7 +1134,12 @@ proc eval*(instrs: seq[Instr],
         of InstrAdd: regs[instr.res] = regs[instr.args[0]] + regs[instr.args[1]]
         of InstrSub: regs[instr.res] = regs[instr.args[0]] - regs[instr.args[1]]
         of InstrMul: regs[instr.res] = regs[instr.args[0]] * regs[instr.args[1]]
-        of InstrDiv: regs[instr.res] = regs[instr.args[0]] div regs[instr.args[1]]
+        of InstrIndexDiv: regs[instr.res] = regs[instr.args[0]] div regs[instr.args[1]]
+        of InstrMod: regs[instr.res] = regs[instr.args[0]] mod regs[instr.args[1]]
+        of InstrWrap:
+          regs[instr.res] = regs[instr.args[0]] mod regs[instr.args[1]]
+          if regs[instr.res] < 0:
+            regs[instr.res] += regs[instr.args[1]]
         of InstrNegate: regs[instr.res] = -regs[instr.args[0]]
         else: raise ShapeError(msg: $instr.kind & " is not allowed in tensor shape definition")
     else:
@@ -1169,7 +1174,7 @@ proc infer_shapes*(program: Program,
         for dim, index in shape.dims:
           var regs = init_table[RegId, int]()
           if index.setup.eval(result, regs):
-            raise ShapeError(msg: "Unable to evaluate all instructions")
+            raise ShapeError(msg: "Unable to evaluate all instructions. Maybe you forgot to pass a required input tensor.")
           sizes[dim] = index.eval(regs)
         result[shape.dest] = sizes
       of ShapeCopy:
@@ -1177,6 +1182,8 @@ proc infer_shapes*(program: Program,
       of ShapeLinear:
         var equations: seq[LinearIndex] = @[]
         for tensor, dims in shape.reads:
+          if tensor notin result:
+            raise ShapeError(msg: "Shape of " & $tensor & " is not known, but required to infer the shape of " & $shape.dest & ". Maybe you forgot to pass a required input tensor.")
           for dim, indices in dims:
             assert indices.len == 1
             let index = indices[0]

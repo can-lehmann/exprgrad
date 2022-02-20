@@ -57,11 +57,15 @@ proc alloc_tensors(fun: Fun, program: Program) =
   if fun.tensor == TensorId(0):
     case fun.kind:
       of FunInput:
-        fun.tensor = program.tensors.alloc(TensorDef(
-          kind: TensorInput,
-          shape: fun.input_shape,
-          name: fun.name
-        ))
+        if fun.name notin program.inputs:
+          program.inputs[fun.name] = program.tensors.alloc(TensorDef(
+            kind: TensorInput,
+            shape: fun.input_shape,
+            name: fun.name
+          ))
+        fun.tensor = program.inputs[fun.name]
+        if program.tensors[fun.tensor].shape != fun.input_shape:
+          raise ParserError(msg: "Expected shapes for input \"" & fun.name & "\" do not match.")
       of FunParam:
         fun.tensor = program.tensors.alloc(TensorDef(
           kind: TensorParam,
