@@ -205,6 +205,10 @@ proc emit_source*[T](model: Model[T]): string =
   bind cgen.to_c
   result = cgen.to_c(model.program)
 
+proc emit_ir*[T](model: Model[T]): string =
+  bind irprint.`$`
+  result = $model.program
+
 proc compile*[T](graphs: varargs[Fun]): Model[T] =
   let program = graphs.to_program()
   program.scalar_type = to_scalar_type(T)
