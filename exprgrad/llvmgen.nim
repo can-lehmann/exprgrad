@@ -383,11 +383,14 @@ proc to_llvm(instrs: seq[Instr], ctx: Context) =
         let
           array_type = ctx.kernel.regs[instr.res].typ
           item_type = array_type.item.to_llvm(ctx)
+          current_block = builder.get_insert_block()
+        builder.position_builder_at_start(ctx.fn.get_entry_basic_block())
         res = builder.build_array_alloca(
           array_type.item.to_llvm(ctx),
           const_nim_int(instr.args.len),
           cstring($instr.res)
         )
+        builder.position_builder_at_end(current_block)
         for it, arg in instr.args:
           let value_ptr = builder.build_gep2(
             item_type,
@@ -443,9 +446,12 @@ proc to_llvm*(program: Program): ModuleRef =
     
     builder.position_builder_at_end(entry)
     var ctx = Context(
-      program: program, module: result,
-      builder: builder, fn: fn,
-      builtin: builtin, target: name,
+      program: program,
+      module: result,
+      builder: builder,
+      fn: fn,
+      builtin: builtin,
+      target: name,
       tensors: new_seq[ValueRef](program.tensors.len)
     )
     for tensor_id in target.tensors:
