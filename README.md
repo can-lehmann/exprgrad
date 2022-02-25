@@ -62,10 +62,20 @@ All layers provided by exprgrad are also implemented in the same way, allowing y
 Although all shown examples already work, bugs are expected and important features for training large models (especially Multithreading and GPU support) might still be missing.
 Please report any issues you might encounter.
 
-Exprgrad requires the LLVM C-API in order to be able to compile models.
-LLVM can be installed using `apt install llvm-dev` on Ubuntu or `dnf install llvm-devel` on Fedora.
+### Ubuntu
 
 ```bash
+$ sudo apt install llvm-13-dev
+$ nimble install exprgrad
+```
+
+**Note:** Your version of Ubuntu may not have the `llvm-13-dev` package in its repositories.
+Follow the instructions at [apt.llvm.org](https://apt.llvm.org/) to install the required repository.
+
+### Fedora
+
+```bash
+$ sudo dnf install llvm-devel
 $ nimble install exprgrad
 ```
 
