@@ -209,6 +209,10 @@ proc emit_ir*[T](model: Model[T]): string =
   bind irprint.`$`
   result = $model.program
 
+proc save_llvm*[T](model: Model[T], path: string) =
+  bind llvmgen.save_bitcode
+  save_bitcode(model.jit, path)
+
 proc compile*[T](graphs: varargs[Fun]): Model[T] =
   let program = graphs.to_program()
   program.scalar_type = to_scalar_type(T)

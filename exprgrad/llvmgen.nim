@@ -232,13 +232,13 @@ proc to_llvm(instrs: seq[Instr], ctx: Context) =
             ctx.scalar_type(), ctx[instr.tensor],
             [ctx[instr.args[0]]], "value_ptr"
           )
+        value_ptr.set_is_in_bounds(1)
         
         case instr.kind:
           of InstrWrite, InstrRead:
             let value = builder.build_load2(
               ctx.scalar_type(), value_ptr, cstring($instr.res)
             )
-            value_ptr.set_is_in_bounds(1)
             value.set_alignment(align)
             case instr.kind:
               of InstrRead: res = value
@@ -444,6 +444,8 @@ proc to_llvm*(program: Program): ModuleRef =
       entry = fn.append_basic_block("entry")
       builder = create_builder()
     
+    builder.enable_fast_math()
+    
     builder.position_builder_at_end(entry)
     var ctx = Context(
       program: program,
@@ -536,19 +538,15 @@ proc new_jit*(module: ModuleRef, builtin: JitBuiltin): Jit =
     err = nil
   
   let
-    builder = pass_manager_builder_create()
-    fn_passes = create_function_pass_manager(module)
-    module_passes = create_pass_manager()
-  builder.opt_level = 3
-  builder.populate_function_pass_manager(fn_passes)
-  builder.populate_module_pass_manager(module_passes)
-  pass_manager_builder_dispose(builder)
-  
-  discard fn_passes.initialize_function_pass_manager()
-  for fn in module.functions:
-    discard fn_passes.run_function_pass_manager(fn)
-  discard fn_passes.finalize_function_pass_manager()
-  discard module_passes.run_pass_manager(module)
+    opts = create_pass_builder_options()
+    pass_err = module.run_passes("default<O3>", machine, opts)
+  if not pass_err.is_nil:
+    let
+      msg = pass_err.get_error_message()
+      str = $msg
+    dispose_error_message(msg)
+    raise JitError(msg: str)
+  dispose_pass_builder_options(opts)
   
   if create_jit_compiler_for_module(result.engine.addr, module, 3, err.addr) != 0:
     raise JitError(msg: $err)
@@ -562,3 +560,6 @@ proc new_jit*(module: ModuleRef, builtin: JitBuiltin): Jit =
 
 proc get_proc*[T: proc](jit: Jit, name: string): T =
   result = cast[T](get_function_address(jit.engine, cstring(name)))
+
+proc save_bitcode*(jit: Jit, path: string) =
+  jit.module.save_bitcode(path)

@@ -1,5 +1,6 @@
 exprgrad/wrappers/llvm
 exprgrad/wrappers/my_module.bc
+exprgrad/wrappers/llvm_ext.o
 examples/xor/xor
 examples/xor_from_scratch/xor_from_scratch
 examples/matmul/matmul

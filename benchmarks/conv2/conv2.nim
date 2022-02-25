@@ -351,6 +351,8 @@ proc measure[T](conv2: proc (images, filters: Tensor[T]): Tensor[T],
     result += stop - start
   result = init_duration(microseconds = result.in_microseconds().int div sample_count)
 
+echo model.emit_ir()
+
 echo "conv2_naive: ", measure[float64](conv2_naive)
 echo "conv2_naive_specialized: ", measure[float64](conv2_naive_specialized)
 echo "conv2_tiled_specialized: ", measure[float64](conv2_tiled_specialized)

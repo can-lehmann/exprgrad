@@ -38,6 +38,8 @@ type
   MetadataRef* {.importc: "LLVMMetadataRef", header: "<llvm-c/Types.h>".} = distinct pointer
   MemoryBufferRef* {.importc: "LLVMMemoryBufferRef", header: "<llvm-c/Types.h>".} = distinct pointer
   PassRegistryRef* {.importc: "LLVMPassRegistryRef", header: "<llvm-c/Types.h>".} = distinct pointer
+  PassBuilderOptionsRef{.importc: "LLVMPassBuilderOptionsRef", header: "<llvm-c/Types.h>".} = distinct pointer
+  ErrorRef{.importc: "LLVMErrorRef", header: "<llvm-c/Types.h>".} = distinct pointer
   LlvmBool = cint
   
   IntPredicate* {.size: sizeof(cint).} = enum
@@ -69,6 +71,7 @@ proc is_nil*(x: ExecutionEngineRef): bool {.borrow.}
 proc is_nil*(x: PassManagerRef): bool {.borrow.}
 proc is_nil*(x: MemoryBufferRef): bool {.borrow.}
 proc is_nil*(x: PassRegistryRef): bool {.borrow.}
+proc is_nil*(x: ErrorRef): bool {.borrow.}
 
 {.push header: "<llvm-c/Core.h>".}
 proc get_global_context*(): ContextRef {.importc: "LLVMGetGlobalContext".}
@@ -117,6 +120,8 @@ proc get_insert_block*(builder: BuilderRef): BasicBlockRef {.importc: "LLVMGetIn
 proc position_builder*(builder: BuilderRef, basic_block: BasicBlockRef, instr: ValueRef) {.importc: "LLVMPositionBuilder".}
 proc position_builder_before*(builder: BuilderRef, instr: ValueRef) {.importc: "LLVMPositionBuilderBefore".}
 proc dispose_builder*(builder: BuilderRef) {.importc: "LLVMDisposeBuilder".}
+proc set_default_fp_math_tag*(builder: BuilderRef, tag: MetadataRef) {.importc: "LLVMBuilderSetDefaultFPMathTag".}
+proc get_default_fp_math_tag*(builder: BuilderRef): MetadataRef {.importc: "LLVMBuilderGetDefaultFPMathTag".}
 proc dispose_message*(msg: cstring) {.importc: "LLVMDisposeMessage".}
 proc get_value_name2*(value: ValueRef, len: ptr csize_t): cstring {.importc: "LLVMGetValueName2".}
 proc set_value_name2*(value: ValueRef, name: cstring, len: csize_t) {.importc: "LLVMSetValueName2".}
@@ -356,6 +361,9 @@ proc parse_bitcode2*(mem: MemoryBufferRef, module: ptr ModuleRef): LlvmBool {.im
 proc parse_bitcode_in_context2*(ctx: ContextRef, mem: MemoryBufferRef, module: ptr ModuleRef): LlvmBool {.importc: "LLVMParseBitcodeInContext2".}
 {.pop.}
 
+proc save_bitcode*(module: ModuleRef, path: string) =
+  module.write_bitcode_to_file(path)
+
 proc load_bitcode*(ctx: ContextRef, path: string): ModuleRef =
   var
     msg: cstring = nil
@@ -424,7 +432,8 @@ proc dispose_pass_manager*(manager: PassManagerRef) {.importc: "LLVMDisposePassM
 {.push header: "<llvm-c/Transforms/PassManagerBuilder.h>".}
 proc pass_manager_builder_create*(): PassManagerBuilderRef {.importc: "LLVMPassManagerBuilderCreate".}
 proc pass_manager_builder_dispose*(builder: PassManagerBuilderRef) {.importc: "LLVMPassManagerBuilderDispose".}
-proc pass_manager_builder_set_opt_level*(builder: PassManagerBuilderRef, level: cuint) {.importc: "LLVMPassManagerBuilderSetOptLevel".}
+proc set_opt_level*(builder: PassManagerBuilderRef, level: cuint) {.importc: "LLVMPassManagerBuilderSetOptLevel".}
+proc set_size_level*(builder: PassManagerBuilderRef, level: cuint) {.importc: "LLVMPassManagerBuilderSetSizeLevel".}
 
 proc populate_function_pass_manager*(builder: PassManagerBuilderRef, manager: PassManagerRef) {.importc: "LLVMPassManagerBuilderPopulateFunctionPassManager".}
 proc populate_module_pass_manager*(builder: PassManagerBuilderRef, manager: PassManagerRef) {.importc: "LLVMPassManagerBuilderPopulateModulePassManager".}
@@ -434,7 +443,10 @@ proc dispose_pass_manager_builder*(builder: PassManagerBuilderRef) {.importc: "L
 {.pop.}
 
 proc `opt_level=`*(builder: PassManagerBuilderRef, level: int) =
-  builder.pass_manager_builder_set_opt_level(cuint(level))
+  builder.set_opt_level(cuint(level))
+
+proc `size_level=`*(builder: PassManagerBuilderRef, level: int) =
+  builder.set_size_level(cuint(level))
 
 {.push header: "<llvm-c/Initialization.h>".}
 proc initialize_core*(registry: PassRegistryRef) {.importc: "LLVMInitializeCore".}
@@ -456,6 +468,24 @@ proc initialize_target*(registry: PassRegistryRef) {.importc: "LLVMInitializeTar
 proc add_loop_vectorize_pass*(manager: PassManagerRef) {.importc: "LLVMAddLoopVectorizePass".}
 proc add_slp_vectorize_pass*(manager: PassManagerRef) {.importc: "LLVMAddSLPVectorizePass".}
 {.pop.}
+
+{.push header: "<llvm-c/Transforms/PassBuilder.h>".}
+proc create_pass_builder_options*(): PassBuilderOptionsRef {.importc: "LLVMCreatePassBuilderOptions".}
+proc dispose_pass_builder_options*(opts: PassBuilderOptionsRef) {.importc: "LLVMDisposePassBuilderOptions".}
+proc run_passes*(module: ModuleRef, passes: cstring, machine: TargetMachineRef, opts: PassBuilderOptionsRef): ErrorRef {.importc: "LLVMRunPasses".}
+{.pop.}
+
+{.push header: "<llvm-c/Error.h>".}
+proc get_error_message*(err: ErrorRef): cstring {.importc: "LLVMGetErrorMessage".}
+proc dispose_error_message*(msg: cstring) {.importc: "LLVMDisposeErrorMessage".}
+{.pop.}
+
+when defined(exprgrad_fast_math):
+  {.link: "llvm_ext.o".}
+  proc enable_fast_math*(builder: BuilderRef) {.importc: "LLVMBuilderEnableFastMath".}
+else:
+  {.warning: "Please compile the file exprgrad/wrappers/llvm_ext.cpp and pass -d:exprgrad_fast_math to enable fast floating point math.".}
+  proc enable_fast_math*(builder: BuilderRef) = discard
 
 when is_main_module:
   let
