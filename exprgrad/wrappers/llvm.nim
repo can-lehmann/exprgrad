@@ -16,8 +16,8 @@
 # The LLVM C-API is licensed under Apache-2.0 WITH LLVM-exception
 # See https://llvm.org/LICENSE.txt for more details.
 
-{.passc: gorge("llvm-config --cflags").}
-{.passl: gorge("llvm-config --libs").}
+{.passc: gorge("llvm-config-13 --cflags").}
+{.passl: gorge("llvm-config-13 --libs").}
 
 type
   ModuleRef* {.importc: "LLVMModuleRef", header: "<llvm-c/Core.h>".} = distinct pointer
