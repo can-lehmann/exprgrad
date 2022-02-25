@@ -25,6 +25,6 @@ jobs:
         with:
           nim-version: ${{ matrix.nim-version }}
       - run: sudo apt update -y
-      - run: sudo apt install -y llvm-13-dev
+      - run: sudo apt install -y llvm-12-dev
       - run: nimble install -Y
       - run: nimble test -Y
