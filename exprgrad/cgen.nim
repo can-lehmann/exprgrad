@@ -145,7 +145,7 @@ proc to_c(instrs: seq[Instr], ctx: Context): string =
         result &= ") {\n" & body & "\n" & make_indent(ctx.indent) & "}"
         result &= " // " & $instr.loop_fuse_next
         continue
-      of InstrLog, InstrExtern, InstrThreads, 
+      of InstrLog, InstrThreads, 
          InstrArray, InstrArrayLen, InstrArrayRead,
          InstrWrap:
         raise GeneratorError(msg: "Unable to generate c source for " & $instr.kind)

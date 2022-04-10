@@ -56,7 +56,7 @@ type
     InstrShape, InstrLen, InstrShapeLen,
     InstrArray, InstrArrayLen, InstrArrayRead,
     InstrRead, InstrWrite, InstrOverwrite,
-    InstrExtern, InstrEpoch,
+    InstrEpoch,
     InstrLoop, InstrThreads
   
   Instr* = object
@@ -68,7 +68,6 @@ type
       of InstrIndex: index_lit*: int
       of InstrScalar: scalar_lit*: float64
       of InstrBoolean: boolean_lit*: bool
-      of InstrExtern: extern*: string
       of InstrShape: dim*: int
       of InstrLoop:
         loop_iter*: RegId

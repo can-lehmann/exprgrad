@@ -104,7 +104,6 @@ proc infer_types(instrs: seq[Instr], regs: var seq[Register]) =
             if arg_type(1).kind != TypeScalar:
               raise TypeError(msg: "Second argument of " & $instr.kind & " must be a Scalar")
           else: discard
-      of InstrExtern: raise TypeError(msg: $instr.kind & " is not valid at runtime")
       of InstrEpoch: ret_type = Type(kind: TypeIndex, count: 1)
       of InstrLoop:
         if arg_type(0).kind != TypeIndex or arg_type(1).kind != TypeIndex:
