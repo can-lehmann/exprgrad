@@ -45,19 +45,39 @@ type
         discard
   
   InstrKind* = enum
+    # Literals
     InstrIndex, InstrScalar, InstrBoolean,
+    # Math
     InstrAdd, InstrSub, InstrMul, InstrDiv,
     InstrIndexDiv, InstrMod, InstrWrap,
     InstrNegate, InstrSin, InstrCos,
     InstrExp, InstrPow, InstrSqrt,
     InstrLog, InstrLog10, InstrLog2, InstrLn,
-    InstrEq, InstrLt, InstrLe, InstrSelect,
+    # Conditional
+    InstrEq, InstrLt, InstrLe, InstrAnd, InstrOr,
+    InstrSelect,
+    # Conversions
     InstrToScalar, InstrToIndex,
+    # Tensor
     InstrShape, InstrLen, InstrShapeLen,
-    InstrArray, InstrArrayLen, InstrArrayRead,
     InstrRead, InstrWrite, InstrOverwrite,
+    # Array
+    InstrArray, InstrArrayLen, InstrArrayRead,
+    # Misc
     InstrEpoch,
-    InstrLoop, InstrThreads
+    # Loops
+    InstrLoop, InstrThreads,
+    # GPU
+    InstrGpu, InstrIf, InstrBarrier
+  
+  GpuIndex* = object
+    local*: RegId
+    group*: RegId
+    size*: int
+  
+  ParallelClosure* = object
+    tensors*: seq[TensorId]
+    regs*: seq[RegId]
   
   Instr* = object
     args*: seq[RegId]
@@ -73,10 +93,12 @@ type
         loop_iter*: RegId
         loop_fuse_next*: bool
       of InstrThreads:
-        threads_closure*: seq[RegId]
-        threads_tensors*: seq[TensorId]
+        threads_closure*: ParallelClosure
         threads_begin*: RegId
         threads_end*: RegId
+      of InstrGpu:
+        gpu_closure*: ParallelClosure
+        gpu_indices*: seq[GpuIndex]
       else: discard
   
   Register* = object
@@ -150,7 +172,7 @@ type
     expr*: Expr
     write*: TensorOp
   
-  CompileTarget* = enum CompileCpu, CompileThreads
+  CompileTarget* = enum CompileCpu, CompileThreads, CompileGpu
   
   Target* = object
     name*: string

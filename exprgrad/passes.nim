@@ -47,6 +47,10 @@ proc infer_types(instrs: seq[Instr], regs: var seq[Register]) =
         if arg_type(0).kind notin {TypeScalar, TypeIndex}:
           raise TypeError(msg: "Argument to " & $instr.kind & " must be a Scalar or an Index")
         ret_type = arg_type(0)
+      of InstrAnd, InstrOr:
+        if arg_type(0).kind != TypeBoolean or arg_type(0).kind != TypeBoolean:
+          raise TypeError(msg: "Arguments of " & $instr.kind & " must be of type Boolean.")
+        ret_type = arg_type(0)
       of InstrSelect:
         let (cond, a, b) = (arg_type(0), arg_type(1), arg_type(2))
         if a != b:
@@ -116,6 +120,19 @@ proc infer_types(instrs: seq[Instr], regs: var seq[Register]) =
         regs[instr.threads_begin].typ = Type(kind: TypeIndex, count: 1)
         regs[instr.threads_end].typ = Type(kind: TypeIndex, count: 1)
         instr.body.infer_types(regs)
+      of InstrGpu:
+        for it, arg in instr.args:
+          if arg_type(it).kind != TypeIndex:
+            raise TypeError(msg: "Gpu ranges must be of type Index")
+        for index in instr.gpu_indices:
+          regs[index.group].typ = Type(kind: TypeIndex, count: 1)
+          regs[index.local].typ = Type(kind: TypeIndex, count: 1)
+        instr.body.infer_types(regs)
+      of InstrIf:
+        if arg_type(0).kind != TypeBoolean:
+          raise TypeError(msg: "If condition must be of type Boolean")
+        instr.body.infer_types(regs)
+      of InstrBarrier: discard
 
 proc infer_types(expr: Expr, regs: var seq[Register]) =
   expr.instrs.infer_types(regs)
@@ -1375,19 +1392,29 @@ proc choose_parallel*(program: Program) =
     preserves=ALL_STAGES
   )
   
-  const LOOP_COUNT = [CompileCpu: 0, CompileThreads: 1]
+  const LOOP_COUNT = [
+    CompileCpu: 0,
+    CompileThreads: 1,
+    CompileGpu: 3
+  ]
+  
   for name, target in program.targets:
     if LOOP_COUNT[target.compile_target] > 0:
       for kernel in target.kernels:
-        var count = LOOP_COUNT[target.compile_target]
-        for loop in kernel.loops.mitems:
+        var
+          count = LOOP_COUNT[target.compile_target]
+          parallel: seq[Loop] = @[]
+          it = 0
+        while it < kernel.loops.len and count > 0:
+          var loop = kernel.loops[it]
           if loop.mode >= LoopIndependent:
             loop.mode = LoopParallel
+            parallel.add(loop)
             count -= 1
+            kernel.loops.delete(it)
           else:
-            break # TODO: Reorder loops?
-          if count <= 0:
-            break
+            it += 1
+        kernel.loops = parallel & kernel.loops
 
 type
   BoundsMode = enum BoundsNone, BoundsDim, BoundsLen
@@ -1582,35 +1609,105 @@ proc collect_defined(instrs: seq[Instr]): HashSet[RegId] =
     if instr.body.len > 0: 
       result = result.union(instr.body.collect_defined())
 
-proc inline_loop(kernel: Kernel) =
+proc inline_loop(kernel: Kernel, compile_target: CompileTarget) =
   let loop = kernel.loops.pop()
   kernel.setup.add(loop.start.setup)
   kernel.setup.add(loop.stop.setup)
   if loop.mode >= LoopParallel:
-    var closure: seq[RegId] = @[]
+    var closure = ParallelClosure()
     let
       used = kernel.expr.instrs.collect_used()
       defined = kernel.setup.collect_defined()
     for reg in used:
       if reg in defined:
-        closure.add(reg)
+        closure.regs.add(reg)
     
     var tensors: seq[TensorId] = @[]
     for tensor in kernel.expr.instrs.collect_tensors():
-      tensors.add(tensor)
+      closure.tensors.add(tensor)
     
-    let (range_begin, range_end) = (kernel.regs.alloc(), kernel.regs.alloc())
-    kernel.expr.instrs = @[Instr(kind: InstrThreads,
-      args: @[loop.start.setup[^1].res, loop.stop.setup[^1].res],
-      threads_begin: range_begin, threads_end: range_end,
-      threads_closure: closure,
-      threads_tensors: tensors,
-      body: @[Instr(kind: InstrLoop,
-        args: @[range_begin, range_end],
-        loop_iter: loop.iter,
-        body: kernel.expr.instrs
-      )]
-    )]
+    case compile_target:
+      of CompileCpu:
+        raise StageError(msg: "Parallel loops are not supported by CPU target")
+      of CompileThreads:
+        let (range_begin, range_end) = (kernel.regs.alloc(), kernel.regs.alloc())
+        kernel.expr.instrs = @[Instr(kind: InstrThreads,
+          args: @[loop.start.setup[^1].res, loop.stop.setup[^1].res],
+          threads_begin: range_begin, threads_end: range_end,
+          threads_closure: closure,
+          body: @[Instr(kind: InstrLoop,
+            args: @[range_begin, range_end],
+            loop_iter: loop.iter,
+            body: kernel.expr.instrs
+          )]
+        )]
+      of CompileGpu:
+        var
+          instr = Instr(kind: InstrGpu,
+            args: @[loop.start.setup[^1].res, loop.stop.setup[^1].res],
+            gpu_closure: closure
+          )
+          iters: seq[RegId] = @[loop.iter]
+        while kernel.loops.len > 0 and
+              kernel.loops[^1].mode >= LoopParallel:
+          let loop = kernel.loops.pop()
+          iters.add(loop.iter)
+          kernel.setup.add(loop.start.setup)
+          kernel.setup.add(loop.stop.setup)
+          instr.args.add([loop.start.setup[^1].res, loop.stop.setup[^1].res])
+        
+        var conds: seq[RegId] = @[]
+        for it, iter in iters:
+          let
+            index = GpuIndex(
+              group: kernel.regs.alloc(),
+              local: kernel.regs.alloc(),
+              size: 16 # TODO
+            )
+            offset = kernel.regs.alloc()
+            size_reg = kernel.regs.alloc()
+          instr.body.add(Instr(kind: InstrIndex,
+            index_lit: index.size,
+            res: size_reg
+          ))
+          instr.body.add(Instr(kind: InstrMul,
+            args: @[index.group, size_reg],
+            res: offset
+          ))
+          instr.body.add(Instr(kind: InstrAdd,
+            args: @[offset, index.local],
+            res: iter
+          ))
+          instr.gpu_indices.add(index)
+          
+          # TODO: Check if shape is static
+          let
+            is_in_range = kernel.regs.alloc()
+            max = instr.args[2 * it + 1]
+          instr.gpu_closure.regs.add(max)
+          instr.body.add(Instr(kind: InstrLt,
+            args: @[iter, max],
+            res: is_in_range
+          ))
+          conds.add(is_in_range)
+        
+        if conds.len > 0:
+          var cond = conds[0]
+          for it in 1..<conds.len:
+            let res = kernel.regs.alloc()
+            instr.body.add(Instr(kind: InstrAnd,
+              args: @[cond, conds[it]],
+              res: res
+            ))
+            cond = res
+          instr.body.add(Instr(kind: InstrIf,
+            args: @[cond],
+            body: kernel.expr.instrs
+          ))
+        else:
+          instr.body.add(kernel.expr.instrs)
+        
+        kernel.expr.instrs = @[instr]
   else:
     kernel.expr.instrs = @[Instr(kind: InstrLoop,
       args: @[loop.start.setup[^1].res, loop.stop.setup[^1].res],
@@ -1619,12 +1716,12 @@ proc inline_loop(kernel: Kernel) =
       body: kernel.expr.instrs
     )]
 
-proc inline_loops(kernels: var seq[Kernel], cur, until_level: int) =
-  let kernel = kernels[cur]
+proc inline_loops(target: var Target, cur, until_level: int) =
+  let kernel = target.kernels[cur]
   while kernel.loops.len > until_level:
     while kernel.loops[^1].fuse_next:
-      kernels.inline_loops(cur + 1, kernel.loops.len)
-      let next_kernel = kernels[cur + 1]
+      target.inline_loops(cur + 1, kernel.loops.len)
+      let next_kernel = target.kernels[cur + 1]
       var
         instrs = next_kernel.expr.instrs
         setup = next_kernel.setup
@@ -1641,8 +1738,8 @@ proc inline_loops(kernels: var seq[Kernel], cur, until_level: int) =
       kernel.setup.add(setup)
       for it in 0..<kernel.loops.len:
         kernel.loops[it].fuse_next = next_kernel.loops[it].fuse_next
-      kernels.delete(cur + 1)
-    kernel.inline_loop()
+      target.kernels.delete(cur + 1)
+    kernel.inline_loop(target.compile_target)
 
 proc inline_loops*(program: Program) =
   program.assert_pass("inline_loops",
@@ -1657,7 +1754,7 @@ proc inline_loops*(program: Program) =
   for name, target in program.targets.mpairs:
     var it = 0
     while it < target.kernels.len:
-      target.kernels.inline_loops(it, 0)
+      target.inline_loops(it, 0)
       it += 1
     
     for kernel in target.kernels:

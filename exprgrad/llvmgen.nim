@@ -211,6 +211,8 @@ proc to_llvm(instrs: seq[Instr], ctx: Context) =
       of InstrEq: generic_op(binop, build_icmp_eq, build_fcmp_oeq)
       of InstrLt: generic_op(binop, build_icmp_slt, build_fcmp_olt)
       of InstrLe: generic_op(binop, build_icmp_sle, build_fcmp_ole)
+      of InstrAnd: binop(build_and)
+      of InstrOr: binop(build_or)
       of InstrToScalar, InstrToIndex:
         let
           from_typ = ctx.kernel.regs[instr.args[0]].typ
@@ -309,9 +311,9 @@ proc to_llvm(instrs: seq[Instr], ctx: Context) =
         builder.position_builder_at_end(end_block)
       of InstrThreads:
         var closure_fields: seq[TypeRef] = @[]
-        for reg in instr.threads_closure:
+        for reg in instr.threads_closure.regs:
           closure_fields.add(ctx.kernel.regs[reg].typ.to_llvm(ctx))
-        for tensor in instr.threads_tensors:
+        for tensor in instr.threads_closure.tensors:
           closure_fields.add(pointer_type(ctx.scalar_type(), 0))
         let closure_type = struct_type(closure_fields)
         
@@ -358,8 +360,8 @@ proc to_llvm(instrs: seq[Instr], ctx: Context) =
               task_ctx[id] = builder.build_load2(closure_fields[offset], field_ptr, cstring($id))
             offset += 1
         
-        make_closure(instr.threads_closure)
-        make_closure(instr.threads_tensors)
+        make_closure(instr.threads_closure.regs)
+        make_closure(instr.threads_closure.tensors)
         
         builder.position_builder_at_end(current_block)
         discard builder.build_call2(ctx.builtin.run_threads_signature(), ctx.builtin.run_threads, [

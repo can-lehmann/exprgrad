@@ -670,12 +670,17 @@ proc cache*(cache: Fun, name: string = ""): Fun =
     effect: Fun(kind: FunCache, cache: cache, name: name)
   )
 
-proc target*(fun: Fun, name: string): Fun =
-  result = Fun(kind: FunTarget, name: name, children: @[fun])
-  when TARGET_SUPPORTS_THREADS:
-    result.compile_target = CompileThreads
-  else:
-    result.compile_target = CompileCpu
+proc target*(fun: Fun,
+             name: string,
+             compile_target = CompileThreads): Fun =
+  result = Fun(kind: FunTarget,
+    name: name,
+    children: @[fun],
+    compile_target: compile_target
+  )
+  when not TARGET_SUPPORTS_THREADS:
+    if compile_target == CompileThreads:
+      result.compile_target = CompileCpu
 
 proc cond*(branches: openArray[(string, Fun)],
            otherwise: Fun = nil): Fun =

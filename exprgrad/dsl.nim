@@ -46,6 +46,8 @@ template define_number(Type: typedesc) {.dirty.} =
   define_binop(Type, Boolean, `<=`, InstrLe)
 
 define_type(Boolean)
+define_binop(Boolean, Boolean, `and`, InstrAnd)
+define_binop(Boolean, Boolean, `or`, InstrAnd)
 
 define_type(Scalar)
 define_number(Scalar)

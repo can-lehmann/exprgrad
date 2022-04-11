@@ -58,6 +58,10 @@ proc find_inline_regs(instrs: seq[Instr],
   for instr in instrs:
     case instr.kind:
       of InstrLoop: inline[instr.loop_iter] = false
+      of InstrGpu:
+        for index in instr.gpu_indices:
+          inline[index.local] = false
+          inline[index.group] = false
       of InstrRead: inline[instr.res] = false
       of InstrIndex, InstrBoolean, InstrScalar:
         inline[instr.res] = true
@@ -91,12 +95,32 @@ proc stringify(instr: Instr, regs: var seq[string], level: int): string =
       result &= "loop " & $instr.loop_iter & " in " & regs[instr.args[0]]
       result &= "..<" & regs[instr.args[1]] & ":\n"
       result &= instr.body.stringify(regs, level + 1)
+    of InstrGpu:
+      result &= "gpu"
+      for it, index in instr.gpu_indices:
+        if it == 0:
+          result &= " "
+        else:
+          result &= "\n" & make_indent(level + 2)
+        result &= "(local " & $index.local & ", group " & $index.group & ")"
+        result &= " in " & regs[instr.args[it * 2]] & "..<" & regs[instr.args[it * 2 + 1]]
+      result &= ":\n"
+      result &= instr.body.stringify(regs, level + 1)
+    of InstrIf:
+      result &= "if " & regs[instr.args[0]] & ":\n"
+      result &= instr.body.stringify(regs, level + 1)
     of InstrShape:
       result &= $instr.tensor & ".shape[" & $instr.dim & "]"
-    of InstrAdd, InstrSub, InstrMul, InstrDiv, InstrIndexDiv, InstrMod:
+    of InstrAdd, InstrSub, InstrMul, InstrDiv, InstrIndexDiv, InstrMod,
+       InstrEq, InstrLt, InstrLe, InstrAnd, InstrOr:
       const OPERATORS = [
         InstrAdd: "+", InstrSub: "-", InstrMul: "*", InstrDiv: "/",
-        InstrIndexDiv: "div", InstrMod: "mod"
+        InstrIndexDiv: "div", InstrMod: "mod", InstrWrap: "wrap",
+        InstrNegate: "", InstrSin: "", InstrCos: "",
+        InstrExp: "", InstrPow: "", InstrSqrt: "",
+        InstrLog: "", InstrLog10: "", InstrLog2: "", InstrLn: "",
+        InstrEq: "==", InstrLt: "<", InstrLe: "<=",
+        InstrAnd: "and", InstrOr: "or"
       ]
       result &= "(" & regs[instr.args[0]] & " " & OPERATORS[instr.kind] & " " & regs[instr.args[1]] & ")"
     else:

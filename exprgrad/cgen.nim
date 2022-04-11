@@ -47,7 +47,9 @@ const NAMES = [
   InstrLn: "log",
   InstrEq: "==",
   InstrLt: "<",
-  InstrLe: "<="
+  InstrLe: "<=",
+  InstrAnd: "&&",
+  InstrOr: "||"
 ]
 
 proc to_c(scalar_type: ScalarType): string =
@@ -78,7 +80,8 @@ proc to_c(instrs: seq[Instr], ctx: Context): string =
       of InstrBoolean: expr = $ord(instr.boolean_lit)
       of InstrAdd, InstrSub, InstrMul, InstrDiv,
          InstrIndexDiv, InstrMod,
-         InstrEq, InstrLt, InstrLe:
+         InstrEq, InstrLt, InstrLe,
+         InstrAnd, InstrOr:
         let
           op = NAMES[instr.kind]
           a = ctx.regs[instr.args[0]]
@@ -145,9 +148,19 @@ proc to_c(instrs: seq[Instr], ctx: Context): string =
         result &= ") {\n" & body & "\n" & make_indent(ctx.indent) & "}"
         result &= " // " & $instr.loop_fuse_next
         continue
+      of InstrIf:
+        let
+          body = ctx.with_indent(instr.body.to_c(ctx))
+          cond = ctx.regs[instr.args[0]]
+        if result.len > 0:
+          result &= "\n"
+        result &= make_indent(ctx.indent)
+        result &= "if (" & cond & ") {\n"
+        result &= body & "\n" & make_indent(ctx.indent) & "}"
+        continue
       of InstrLog, InstrThreads, 
          InstrArray, InstrArrayLen, InstrArrayRead,
-         InstrWrap:
+         InstrWrap, InstrGpu, InstrBarrier:
         raise GeneratorError(msg: "Unable to generate c source for " & $instr.kind)
     
     var stmt = ""
