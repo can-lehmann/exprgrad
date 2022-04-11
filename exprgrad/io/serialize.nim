@@ -329,7 +329,8 @@ macro serializable*(args: typed): untyped =
 
 serializable([KernelId, RegId, TensorId, LoopId])
 serializable([TypeKind, Type])
-serializable([LoopMode, InstrKind, Instr])
+serializable([LoopMode, ParallelClosure, GpuIndex])
+serializable([InstrKind, Instr])
 serializable([Register, Expr, LinearIndex])
 serializable([Loop])
 serializable([TensorOpKind, TensorOp])
