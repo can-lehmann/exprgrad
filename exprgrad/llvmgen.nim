@@ -434,7 +434,8 @@ proc to_llvm(kernel: Kernel, kernel_id: KernelId, ctx: Context) =
 proc to_llvm*(program: Program): ModuleRef =
   program.assert_gen("llvm", requires={
     StageTyped, StageGenerated, StageTensors, StageShapes,
-    StageLoops, StageTensorInstrs, StageSortedShapes
+    StageLoops, StageTensorInstrs, StageSortedShapes,
+    StageConditions
   })
 
   result = module_create_with_name("module")

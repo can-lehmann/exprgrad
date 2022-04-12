@@ -168,6 +168,7 @@ type
     regs*: seq[Register]
     setup*: seq[Instr]
     loops*: seq[Loop]
+    conds*: seq[Expr]
     reads*: seq[TensorOp]
     expr*: Expr
     write*: TensorOp
@@ -209,6 +210,7 @@ type
     StageSortedShapes, # Shape constraint order is known. This stage should only be used in addition to StageConstraints, not insted of it.
     StageStaticShapes, # All static shapes are inferred
     StageIndependent, # All independent loops are identified
+    StageConditions, # All conditions are inlined
     StageLoops # All loops are inlined
   
   Program* = ref object

@@ -156,6 +156,10 @@ proc infer_types*(kernel: Kernel) =
       loop.start.infer_types(kernel.regs)
       loop.stop.infer_types(kernel.regs)
       kernel.regs[loop.iter].typ = Type(kind: TypeIndex, count: 1)
+    for cond in kernel.conds:
+      cond.infer_types(kernel.regs)
+      if kernel.regs[cond.res].typ.kind != TypeBoolean:
+        raise TypeError(msg: "Condition must be of type Boolean")
     for read in kernel.reads:
       read.infer_types(kernel.regs)
       kernel.regs[read.data].typ = Type(kind: TypeScalar, count: 1)
@@ -1595,6 +1599,43 @@ proc fuse_loops*(program: Program) =
             break
           a.loops[it].fuse_next = true
 
+proc inline_conditions(kernel: Kernel) =
+  if kernel.conds.len > 0:
+    let body = kernel.expr.instrs
+    kernel.expr.instrs = @[]
+    
+    var res = RegId(0)
+    for cond in kernel.conds:
+      kernel.expr.instrs.add(cond.instrs)
+      if res == RegId(0):
+        res = cond.res
+      else:
+        let new_res = kernel.regs.alloc()
+        kernel.expr.instrs.add(Instr(kind: InstrAnd,
+          args: @[res, cond.res],
+          res: new_res
+        ))
+        res = new_res
+    kernel.conds = @[]
+    
+    kernel.expr.instrs.add(Instr(kind: InstrIf,
+      args: @[res],
+      body: body
+    ))
+
+proc inline_conditions*(program: Program) =
+  program.assert_pass("inline_conditions",
+    produces={StageConditions},
+    preserves={
+      StageBounds, StageGenerated, StageTensors, StageShapes,
+      StageSortedShapes, StageTensorInstrs
+    }
+  )
+  
+  for name, target in program.targets:
+    for kernel in target.kernels:
+      kernel.inline_conditions()
+
 proc collect_used(instrs: seq[Instr]): HashSet[RegId] =
   for instr in instrs:
     for arg in instr.args:
@@ -1743,11 +1784,11 @@ proc inline_loops(target: var Target, cur, until_level: int) =
 
 proc inline_loops*(program: Program) =
   program.assert_pass("inline_loops",
-    requires={StageBounds},
+    requires={StageBounds, StageConditions},
     produces={StageLoops},
     preserves={
       StageGenerated, StageTensors, StageShapes,
-      StageSortedShapes, StageTensorInstrs
+      StageSortedShapes, StageTensorInstrs, StageConditions
     }
   )
   

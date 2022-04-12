@@ -212,7 +212,8 @@ proc to_c(kernel: Kernel, ctx: Context): string =
 proc to_c*(program: Program): string =
   program.assert_gen("c", requires={
     StageTyped, StageGenerated, StageTensors, StageShapes,
-    StageLoops, StageTensorInstrs, StageSortedShapes
+    StageLoops, StageTensorInstrs, StageSortedShapes,
+    StageConditions
   })
   
   let ctx = Context(program: program)

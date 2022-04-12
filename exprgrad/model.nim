@@ -237,6 +237,7 @@ proc compile*[T](graphs: varargs[Fun]): Model[T] =
   program.inline_static_shapes()
   program.lift_shape_instrs()
   program.unfold_loop_bounds()
+  program.inline_conditions()
   program.inline_loops()
   program.infer_types()
   result = new_model[T](program)
