@@ -367,7 +367,7 @@ proc clone*(kernel: Kernel): Kernel =
 
 proc substitute*(instrs: var seq[Instr], subs: Table[TensorId, TensorId]) =
   for instr in instrs.mitems:
-    if instr.tensor != TensorId(0):
+    if instr.tensor != TensorId(0) and instr.tensor in subs:
       instr.tensor = subs[instr.tensor]
 
 proc substitute*(index: var LinearIndex, subs: Table[TensorId, TensorId]) =
@@ -380,7 +380,8 @@ proc substitute*(loop: var Loop, subs: Table[TensorId, TensorId]) =
 proc substitute*(op: var TensorOp, subs: Table[TensorId, TensorId]) =
   for dim in op.dims.mitems:
     dim.substitute(subs)
-  op.tensor = subs[op.tensor]
+  if op.tensor in subs:
+    op.tensor = subs[op.tensor]
 
 proc substitute*(kernel: Kernel, subs: Table[TensorId, TensorId])
 
@@ -388,7 +389,8 @@ proc substitute*(grad: var KernelGradient, subs: Table[TensorId, TensorId]) =
   if grad.is_custom:
     if grad.subs.len > 0:
       for a, b in grad.subs:
-        grad.subs[a] = subs[b]
+        if b in subs:
+          grad.subs[a] = subs[b]
     else:
       grad.subs = subs
 
@@ -403,7 +405,8 @@ proc substitute*(kernel: Kernel, subs: Table[TensorId, TensorId]) =
   kernel.write.substitute(subs)
 
 proc substitute*(shape: var ShapeConstraint, subs: Table[TensorId, TensorId]) =
-  shape.dest = subs[shape.dest]
+  if shape.dest in subs:
+    shape.dest = subs[shape.dest]
   case shape.kind:
     of ShapeNone: discard
     of ShapeDims:
@@ -411,14 +414,18 @@ proc substitute*(shape: var ShapeConstraint, subs: Table[TensorId, TensorId]) =
         dim.substitute(subs)
     of ShapeLinear:
       var reads = init_table[TensorId, seq[seq[LinearIndex]]]()
-      for tensor, dims in shape.reads:
-        reads[subs[tensor]] = dims
-        for indices in reads[subs[tensor]].mitems:
+      for initial_tensor, dims in shape.reads:
+        var tensor = initial_tensor
+        if tensor in subs:
+          tensor = subs[tensor]
+        reads[tensor] = dims
+        for indices in reads[tensor].mitems:
           for index in indices.mitems:
             index.substitute(subs)
       shape.reads = reads
     of ShapeCopy:
-      shape.src = subs[shape.src]
+      if shape.src in subs:
+        shape.src = subs[shape.src]
 
 iterator tensor_ops*(kernel: Kernel): (TensorOpKind, TensorOp) =
   for read in kernel.reads:

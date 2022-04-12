@@ -533,8 +533,11 @@ proc generate*(program: Program) =
             
             if kernel.grad.is_custom:
               var subs = kernel.grad.subs
-              for tensor, grad in kernel.grad.tensors:
-                subs[grad] = grad_tensors[kernel.grad.subs[tensor]]
+              for initial_tensor, grad in kernel.grad.tensors:
+                var tensor = initial_tensor
+                if tensor in kernel.grad.subs:
+                  tensor = kernel.grad.subs[tensor]
+                subs[grad] = grad_tensors[tensor]
               for it in countdown(kernel.grad.kernels.len - 1, 0):
                 var grad_kernel = kernel.grad.kernels[it].clone()
                 grad_kernel.substitute(subs)
