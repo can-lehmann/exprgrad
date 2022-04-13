@@ -213,9 +213,7 @@ proc save_llvm*[T](model: Model[T], path: string) =
   bind llvmgen.save_bitcode
   save_bitcode(model.jit, path)
 
-proc compile*[T](graphs: varargs[Fun]): Model[T] =
-  let program = graphs.to_program()
-  program.scalar_type = to_scalar_type(T)
+proc compile*(program: Program) =
   program.make_tensor_lookups()
   program.dead_code_elim()
   program.fold_linear_indices()
@@ -240,6 +238,11 @@ proc compile*[T](graphs: varargs[Fun]): Model[T] =
   program.inline_conditions()
   program.inline_loops()
   program.infer_types()
+
+proc compile*[T](graphs: varargs[Fun]): Model[T] =
+  let program = graphs.to_program()
+  program.scalar_type = to_scalar_type(T)
+  program.compile()
   result = new_model[T](program)
 
 proc alloc_shapes[T](model: Model[T], target: string, shapes: Table[ir.TensorId, seq[int]]) =

@@ -96,6 +96,8 @@ type
       of FunBackwards, FunGradient, FunMultiple, FunGradientArg:
         discard
 
+proc hash*(fun: Fun): Hash = hash(fun[].addr)
+
 proc literal*(value: bool): Boolean =
   result = Boolean(ExprBuilder(kind: ExprInstr, instr: InstrBoolean, boolean_lit: value))
 
@@ -117,7 +119,7 @@ proc literal*[T](arr: openArray[T]): auto =
   result = Array[typeof(literal(arr[0]))](builder)
 
 proc iterator_literal*(name: string): Index =
-  result = Index(ExprBuilder(kind: ExprIter, iter: name))
+  result = Index(ExprBuilder(kind: ExprIter, iter: name.nim_ident_normalize()))
 
 type BuildContext = object
   kernel: Kernel
@@ -161,19 +163,27 @@ proc build*(builder: ExprBuilder,
         for dim in builder.children:
           dims.add(dim.build_linear_index(ctx))
         
+        var schedule = DEFAULT_TENSOR_SCHEDULE
+        if builder.tensor in ctx.schedule.tensors:
+          schedule = ctx.schedule.tensors[builder.tensor]
+        
         let res = ctx.kernel.regs.alloc()
         ctx.kernel.reads.add(TensorOp(
           tensor: ctx.lookup_tensor(builder.tensor),
           is_raw: builder.is_raw,
           dims: dims,
-          data: res
+          data: res,
+          schedule: schedule
         ))
         builder.res[block_id] = res
       of ExprIter:
         if builder.iter notin ctx.iters:
           let reg = ctx.kernel.regs.alloc()
           ctx.iters[builder.iter] = reg
-          ctx.kernel.loops.add(Loop(iter: reg))
+          var schedule = DEFAULT_LOOP_SCHEDULE
+          if builder.iter in ctx.schedule.loops:
+            schedule = ctx.schedule.loops[builder.iter]
+          ctx.kernel.loops.add(Loop(iter: reg, schedule: schedule))
         builder.res[block_id] = ctx.iters[builder.iter]
       of ExprInstr:
         var instr = Instr(kind: builder.instr)
@@ -238,8 +248,6 @@ proc build(builder: KernelBuilder, compile_target: CompileTarget): Kernel =
   builder.clear()
   var ctx = BuildContext(compile_target: compile_target)
   result = builder.build(ctx)
-
-proc hash*(fun: Fun): Hash = hash(fun[].addr)
 
 proc alloc_tensors(fun: Fun, program: Program) =
   if fun.tensor == TensorId(0):

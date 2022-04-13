@@ -102,7 +102,7 @@ proc stringify(instr: Instr, regs: var seq[string], level: int): string =
           result &= " "
         else:
           result &= "\n" & make_indent(level + 2)
-        result &= "(local " & $index.local & ", group " & $index.group & ")"
+        result &= "(local " & $index.local & ", group " & $index.group & ", size " & $index.size & ")"
         result &= " in " & regs[instr.args[it * 2]] & "..<" & regs[instr.args[it * 2 + 1]]
       result &= ":\n"
       result &= instr.body.stringify(regs, level + 1)

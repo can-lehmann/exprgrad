@@ -23,11 +23,3 @@ export param, input, cache, rand, params, grad
 export backwards, optimize, backprop, reshape, target, CompileTarget, cond
 export Model, compile, call, apply, fit, emit_source, emit_ir, save_llvm
 export ir.`==`, ir.hash, parser.hash
-
-when not defined(no_tensor_warning):
-  echo ""
-  echo "WARNING: The tensor dimension order in exprgrad was changed to be consistent with other tensor libraries."
-  echo "WARNING: This means, that the order of the dimensions in tensor shapes and access operations must be"
-  echo "WARNING: reversed when porting code from version 0.0.1 to 0.0.2 (this version)."
-  echo "WARNING: Matricies are now specified in the order [height, width] and accessed with mat[y, x]."
-  echo "WARNING: This warning can be disabled with -d:no_tensor_warning and will also be removed in the future."

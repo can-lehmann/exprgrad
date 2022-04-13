@@ -1691,22 +1691,22 @@ proc inline_loop(kernel: Kernel, compile_target: CompileTarget) =
             args: @[loop.start.setup[^1].res, loop.stop.setup[^1].res],
             gpu_closure: closure
           )
-          iters: seq[RegId] = @[loop.iter]
+          loops = @[loop]
         while kernel.loops.len > 0 and
               kernel.loops[^1].mode >= LoopParallel:
           let loop = kernel.loops.pop()
-          iters.add(loop.iter)
+          loops.add(loop)
           kernel.setup.add(loop.start.setup)
           kernel.setup.add(loop.stop.setup)
           instr.args.add([loop.start.setup[^1].res, loop.stop.setup[^1].res])
         
         var conds: seq[RegId] = @[]
-        for it, iter in iters:
+        for it, loop in loops:
           let
             index = GpuIndex(
               group: kernel.regs.alloc(),
               local: kernel.regs.alloc(),
-              size: 16 # TODO
+              size: loop.schedule.tile_size
             )
             offset = kernel.regs.alloc()
             size_reg = kernel.regs.alloc()
@@ -1720,17 +1720,17 @@ proc inline_loop(kernel: Kernel, compile_target: CompileTarget) =
           ))
           instr.body.add(Instr(kind: InstrAdd,
             args: @[offset, index.local],
-            res: iter
+            res: loop.iter
           ))
           instr.gpu_indices.add(index)
           
           # TODO: Check if shape is static
           let
             is_in_range = kernel.regs.alloc()
-            max = instr.args[2 * it + 1]
+            max = loop.stop.setup[^1].res
           instr.gpu_closure.regs.add(max)
           instr.body.add(Instr(kind: InstrLt,
-            args: @[iter, max],
+            args: @[loop.iter, max],
             res: is_in_range
           ))
           conds.add(is_in_range)

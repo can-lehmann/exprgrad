@@ -19,6 +19,7 @@ tests/test_serialize
 tests/test_json
 tests/test_dnn
 tests/test_csv
+tests/test_gpu
 tests/data.bin
 old/
 docs/assets/social-banner/
