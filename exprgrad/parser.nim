@@ -453,7 +453,7 @@ type KernelAttrs = object
 proc parse_schedule(node: NimNode): Schedule =
   result = Schedule()
 
-proc gen_kernel_builder(target: TargetInfo, value: NimNode, attrs: KernelAttrs): NimNode
+proc gen_kernel_builder(target: TargetInfo, value_node: NimNode, attrs: KernelAttrs): NimNode
 
 proc parse_attrs(node: NimNode): KernelAttrs =
   for child in node:
@@ -480,10 +480,25 @@ proc parse_attrs(node: NimNode): KernelAttrs =
     elif child.kind != nnkDiscardStmt:
       raise ParserError(msg: $child.kind & " is not a valid kernel attribute")
 
-proc gen_kernel_builder(target: TargetInfo, value: NimNode, attrs: KernelAttrs): NimNode =
+proc gen_kernel_builder(target: TargetInfo, value_node: NimNode, attrs: KernelAttrs): NimNode =
   var dims: seq[NimNode] = @[]
   for dim in target.dims:
     dims.add(new_call(bind_sym("literal"), dim))
+  var
+    value = value_node
+    iters: seq[string] = @[]
+  if value.kind == nnkInfix and value[0].is_name("|"):
+    value = value[1]
+    let iters_node = value_node[2]
+    case iters_node.kind:
+      of nnkSym, nnkIdent:
+        iters.add(iters_node.str_val)
+      of nnkPar, nnkTupleConstr:
+        for child in iters_node:
+          assert child.is_name
+          iters.add(child.str_val)
+      else:
+        raise ParserError(msg: iters_node.repr & " is not a valid iterator")
   var fields = @{
     "target": target.tensor,
     "dims": new_call(bind_sym("@"), new_tree(nnkBracket, dims)),
@@ -493,7 +508,13 @@ proc gen_kernel_builder(target: TargetInfo, value: NimNode, attrs: KernelAttrs):
   if attrs.has_custom_grad:
     fields.add(("has_custom_grad", new_lit(true)))
     fields.add(("grads", new_call(bind_sym("@"), new_tree(nnkBracket, attrs.custom_grad))))
-  result = new_obj_constr(bind_sym("KernelBuilder"), fields)
+  result = new_nim_node(nnkStmtListExpr)
+  for iter in iters:
+    result.add(new_let_stmt(ident(iter),
+      new_call(bind_sym("iterator_literal"), new_lit(iter))
+    ))
+  result.add(new_obj_constr(bind_sym("KernelBuilder"), fields))
+  result = new_tree(nnkBlockStmt, new_empty_node(), result)
 
 proc gen_kernel(target_node, value, attrs_node: NimNode): NimNode =
   let
@@ -511,16 +532,6 @@ macro `++=`*(target_node, value, attrs_node: untyped): untyped =
 
 macro `++=`*(target_node, value: untyped): untyped =
   result = gen_kernel(target_node, value, new_stmt_list())
-
-macro iters*(names: varargs[untyped]): untyped =
-  result = new_tree(nnkLetSection)
-  for name in names:
-    assert name.is_name
-    result.add(new_ident_defs(
-      ident(name.str_val),
-      bind_sym("Index"),
-      new_call(bind_sym("iterator_literal"), new_lit(name.str_val))
-    ))
 
 proc copy_shape*(fun, src: Fun) =
   if fun.kind != FunResult:

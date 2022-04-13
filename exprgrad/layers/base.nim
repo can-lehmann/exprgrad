@@ -16,29 +16,26 @@
 
 import ../parser, ../dsl
 
-iters it:
-  proc `+`*(a, b: Fun): Fun {.layer.} = result{it} ++= a{it} + b{it}
-  proc `-`*(a, b: Fun): Fun {.layer.} = result{it} ++= a{it} - b{it}
-  proc min*(a, b: Fun): Fun {.layer.} = result{it} ++= min(a{it}, b{it})
-  proc max*(a, b: Fun): Fun {.layer.} = result{it} ++= max(a{it}, b{it})
-  
-  proc `*`*(a: Fun, factor: float64): Fun {.layer.} = result{it} ++= a{it} * factor
-  proc `/`*(a: Fun, factor: float64): Fun {.layer.} = result{it} ++= a{it} / factor
+proc `+`*(a, b: Fun): Fun {.layer.} = result{it} ++= a{it} + b{it} | it
+proc `-`*(a, b: Fun): Fun {.layer.} = result{it} ++= a{it} - b{it} | it
+proc min*(a, b: Fun): Fun {.layer.} = result{it} ++= min(a{it}, b{it}) | it
+proc max*(a, b: Fun): Fun {.layer.} = result{it} ++= max(a{it}, b{it}) | it
+
+proc `*`*(a: Fun, factor: float64): Fun {.layer.} = result{it} ++= a{it} * factor | it
+proc `/`*(a: Fun, factor: float64): Fun {.layer.} = result{it} ++= a{it} / factor | it
 
 proc matmul*(a, b: Fun): Fun {.layer.} =
-  iters it, x, y:
-    result[y, x] ++= a[y, it] * b[it, x]
+  result[y, x] ++= a[y, it] * b[it, x] | (y, x, it)
 
 proc `*`*(a, b: Fun): Fun = matmul(a, b)
 
 proc transpose*(mat: Fun): Fun {.layer.} =
-  iters x, y:
-    result[y, x] ++= mat[x, y]
+  result[y, x] ++= mat[x, y] | (y, x)
 
 # Optimizers
 
 proc gradient_descent*(param: var Fun, grad: Fun, rate: float64 = 0.01) =
-  iters it: param{it} ++= -grad{it} * rate
+  param{it} ++= -grad{it} * rate | it
 
 proc adam*(param: var Fun, grad: Fun,
            eta: float64 = 0.01,
@@ -47,28 +44,24 @@ proc adam*(param: var Fun, grad: Fun,
            eps: float64 = 1e-8) =
   ## Diederik P. Kingma and Jimmy Ba, "Adam: A Method for Stochastic Optimization", 2014
   var (m, v) = (cache(param, "adam.m"), cache(param, "adam.v"))
-  iters it:
-    m{it} ++= m{it} * (beta1 - 1.0) + (1.0 - beta1) * grad{it}
-    v{it} ++= v{it} * (beta2 - 1.0) + (1.0 - beta2) * sq(grad{it})
-    param{it} ++= (
-      let m_hat = m{it} / (1.0 - pow(beta1, to_scalar(epoch())));
-      let v_hat = v{it} / (1.0 - pow(beta2, to_scalar(epoch())));
-      -eta * m_hat / (sqrt(v_hat) + eps)
-    )
+  m{it} ++= m{it} * (beta1 - 1.0) + (1.0 - beta1) * grad{it} | it
+  v{it} ++= v{it} * (beta2 - 1.0) + (1.0 - beta2) * sq(grad{it}) | it
+  param{it} ++= (
+    let m_hat = m{it} / (1.0 - pow(beta1, to_scalar(epoch())));
+    let v_hat = v{it} / (1.0 - pow(beta2, to_scalar(epoch())));
+    -eta * m_hat / (sqrt(v_hat) + eps)
+  ) | it
 
 # Losses
 
 proc mse*(a, b: Fun): Fun {.layer.} =
-  iters it:
-    result[0] ++= sq(a{it} - b{it}) / to_scalar(a.shape[0])
+  result[0] ++= sq(a{it} - b{it}) / to_scalar(a.shape[0]) | it
 
 proc binary_cross_entropy*(pred, labels: Fun): Fun {.layer.} =
-  iters it:
-    result[0] ++= -(
-      labels{it} * ln(pred{it}) +
-      (1.0 - labels{it}) * ln(1.0 - pred{it})
-    ) / to_scalar(pred.shape[0])
+  result[0] ++= -(
+    labels{it} * ln(pred{it}) +
+    (1.0 - labels{it}) * ln(1.0 - pred{it})
+  ) / to_scalar(pred.shape[0]) | it
 
 proc cross_entropy*(pred, labels: Fun): Fun {.layer.} =
-  iters it:
-    result[0] ++= -(labels{it} * ln(pred{it})) / to_scalar(pred.shape[0])
+  result[0] ++= -(labels{it} * ln(pred{it})) / to_scalar(pred.shape[0]) | it

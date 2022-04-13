@@ -16,7 +16,7 @@
 
 import ir, parser
 
-export Scalar, Index, Boolean, literal
+export Scalar, Index, Boolean, literal, iterator_literal
 
 template define_binop(ArgType, ResultType: typedesc, op, instr_kind: untyped) =
   proc op*(a, b: ArgType): ResultType =

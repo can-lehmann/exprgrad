@@ -19,8 +19,7 @@ import exprgrad
 import ../tools/test_framework
 
 test "matmul":
-  iters y, x, it
-  c*[y, x] ++= input("a")[y, it] * input("b")[it, x]
+  c*[y, x] ++= input("a")[y, it] * input("b")[it, x] | (x, y, it)
   let model = compile[float32](c.target("c"))
   block:
     let
@@ -30,8 +29,7 @@ test "matmul":
 
 test "relu":
   var inp = input("inp")
-  iters it
-  outp*{it} ++= select(0.0 < inp{it}, inp{it}, 0.0)
+  outp*{it} ++= select(0.0 < inp{it}, inp{it}, 0.0) | it
   let model = compile[float32](outp.target("outp"))
   block:
     let
@@ -40,8 +38,7 @@ test "relu":
     check model.call("outp", {"inp": inp}) == outp
 
 test "mean_squared_error":
-  iters it
-  loss*[0] ++= sq(input("pred"){it} - input("labels"){it})
+  loss*[0] ++= sq(input("pred"){it} - input("labels"){it}) | it
   let model = compile[float32](loss.target("loss"))
   block:
     let
@@ -56,8 +53,7 @@ test "mean_squared_error":
     }) == new_tensor([1], @[float32 9 + 1 + 1 + 9])
 
 test "transpose":
-  iters y, x
-  b*[y, x] ++= input("a")[x, y]
+  b*[y, x] ++= input("a")[x, y] | (x, y)
   block:
     let
       model = compile[float32](b.target("b"))
@@ -66,9 +62,8 @@ test "transpose":
     check model.call("b", {"a": a}) == a.transpose()
 
 test "max":
-  iters it
   let x = input("x")
-  res*{it} ++= max(x{it}, input("y"){it})
+  res*{it} ++= max(x{it}, input("y"){it}) | it
   res.copy_shape(x)
   
   let model = compile[float32](res.target("z"))
@@ -92,8 +87,7 @@ test "shape":
 
 test "extern":
   proc `*`(inp: Fun, factor: float64): Fun =
-    iters it
-    result{it} ++= inp{it} * factor
+    result{it} ++= inp{it} * factor | it
   
   proc test_with_factor(factor: float64) =
     let
@@ -107,18 +101,17 @@ test "extern":
 test "xor":
   randomize(10)
   
-  iters y, x, it
-  hidden*[y, x] ++= input("x")[y, it] * param([2, 4])[it, x]
-  hidden[y, x] ++= param([4])[x]
-  hidden_relu*{it} ++= select(hidden{it} <= 0.0, 0.1 * hidden{it}, hidden{it})
-  output*[y, x] ++= hidden_relu[y, it] * param([4, 1])[it, x]
-  output[y, x] ++= param([1])[x]
-  output_sigmoid*{it} ++= 1.0 / (1.0 + exp(-output{it})) 
+  hidden*[y, x] ++= input("x")[y, it] * param([2, 4])[it, x] | (y, x, it)
+  hidden[y, x] ++= param([4])[x] | (y, x)
+  hidden_relu*{it} ++= select(hidden{it} <= 0.0, 0.1 * hidden{it}, hidden{it}) | it
+  output*[y, x] ++= hidden_relu[y, it] * param([4, 1])[it, x] | (y, x, it)
+  output[y, x] ++= param([1])[x] | (y, x)
+  output_sigmoid*{it} ++= 1.0 / (1.0 + exp(-output{it})) | it
   let pred = output_sigmoid.target("predict")
   
   proc optim(param: var Fun, grad: Fun) =
-    param{it} ++= -0.1 * grad{it}
-  loss*[0] ++= sq(pred{it} - input("y"){it})
+    param{it} ++= -0.1 * grad{it} | it
+  loss*[0] ++= sq(pred{it} - input("y"){it}) | it
   let net = loss.target("loss").backprop(optim).target("train")
   
   let model = compile[float32](net)
@@ -134,10 +127,9 @@ test "xor":
 
 test "custom_grad":
   let inp = input("inp")
-  iters x
-  identity*{x} ++= inp{x} do:
+  identity*{x} ++= inp{x} | x do:
     custom_grad:
-      grad(inp){x} ++= inp{x} * 2.0 * grad(identity){x}
+      grad(inp){x} ++= inp{x} * 2.0 * grad(identity){x} | x
   
   let
     graph = identity
@@ -154,11 +146,10 @@ test "custom_grad":
 
 test "dynamic_ast":
   proc elementwise_pow(fun: Fun, n: int): Fun =
-    iters it
     var prod: Scalar = 1.0
     for _ in 0..<n:
-      prod = prod * fun{it}
-    result{it} ++= prod
+      prod = prod * fun{iterator_literal("it")}
+    result{it} ++= prod | it
     result.copy_shape(fun)
   
   let x = new_tensor([3, 2], @[float32 1, 2, 3, 4, 5, 6])
@@ -172,18 +163,16 @@ test "dynamic_ast":
       expected_y{it} *= x{it}
 
 test "array":
-  iters x
   res*[x] ++= (
     let arr = literal([1.0, 2.0, 3.0]);
     arr[x] + to_scalar(arr.len)
-  )
+  ) | x
   res.with_shape(3)
   
   let model = compile[float32](res.target("y"))
   check model.call("y", []) == new_tensor([3], @[float32 4, 5, 6])
 
 test "nested_array":
-  iters x, y
   res*[y, x] ++= (
     let arr = literal([
       [1.0, 2.0, 3.0],
@@ -191,7 +180,7 @@ test "nested_array":
       [7.0, 8.0, 9.0]
     ]);
     arr[y][x]
-  )
+  ) | (y, x)
   res.with_shape(3, 3)
   
   let model = compile[float32](res.target("y"))

@@ -17,37 +17,36 @@
 import ../parser, ../dsl
 
 proc dense*(values: Fun, inp, outp: int, has_bias: bool = true): Fun {.layer.} =
-  iters x, y, it:
-    let weights = param([inp, outp])
-    result[y, x] ++= values[y, it] * weights[it, x]
-    if has_bias:
-      let bias = param([outp])
-      result[y, x] ++= bias[x]
+  let weights = param([inp, outp])
+  result[y, x] ++= values[y, it] * weights[it, x] | (x, y, it)
+  if has_bias:
+    let bias = param([outp])
+    result[y, x] ++= bias[x] | (y, x)
 
 proc relu*(inp: Fun): Fun {.layer.} =
-  iters it: result{it} ++= select(inp{it} >= 0.0, inp{it}, 0.0)
+  result{it} ++= select(inp{it} >= 0.0, inp{it}, 0.0) | it
 
 proc leaky_relu*(inp: Fun, leak: float64 = 0.01): Fun {.layer.} =
-  iters it: result{it} ++= select(inp{it} >= 0.0, 1.0, leak) * inp{it}
+  result{it} ++= select(inp{it} >= 0.0, 1.0, leak) * inp{it} | it
 
 proc sigmoid*(inp: Fun): Fun {.layer.} =
-  iters it: result{it} ++= 1.0 / (1.0 + exp(-inp{it}))
+  result{it} ++= 1.0 / (1.0 + exp(-inp{it})) | it
 
 proc tanh*(inp: Fun): Fun {.layer.} =
-  iters it: result{it} ++= (
+  result{it} ++= (
     let a = exp(inp{it});
     let b = exp(-inp{it});
     (a - b) / (a + b)
-  )
+  ) | it
 
 proc sin*(inp: Fun): Fun {.layer.} =
-  iters it: result{it} ++= sin(inp{it})
+  result{it} ++= sin(inp{it}) | it
 
 proc conv2*(images, filters: Fun): Fun {.layer.} =
-  iters image, y, x, filter, dx, dy, chan:
-    result[image, y, x, filter] ++=
-      images[image, y + dy, x + dx, chan] *
-      filters[filter, dy, dx, chan]
+  result[image, y, x, filter] ++= (
+    images[image, y + dy, x + dx, chan] *
+    filters[filter, dy, dx, chan]
+  ) | (image, y, x, filter, dx, dy, chan)
 
 proc conv2*(images: Fun, chans, w, h, filters: int): Fun =
   let filters = param([filters, h, w, chans])
@@ -57,34 +56,30 @@ proc max(x, y, z, w: Scalar): Scalar =
   result = max(max(x, y), max(z, w))
 
 proc maxpool2*(images: Fun): Fun {.layer.} =
-  iters image, y, x, chan:
-    result[image, y, x, chan] ++= max(
-      images[image, y * 2, x * 2, chan],
-      images[image, y * 2 + 1, x * 2, chan],
-      images[image, y * 2, x * 2 + 1, chan],
-      images[image, y * 2 + 1, x * 2 + 1, chan]
-    ) | custom_grad(
+  result[image, y, x, chan] ++= max(
+    images[image, y * 2, x * 2, chan],
+    images[image, y * 2 + 1, x * 2, chan],
+    images[image, y * 2, x * 2 + 1, chan],
+    images[image, y * 2 + 1, x * 2 + 1, chan]
+  ) | (image, y, x, chan) do:
+    custom_grad:
       grad(images)[image, y, x, chan] ++= select(
         images[image, y, x, chan] == result[image, y div 2, x div 2, chan],
         grad(result)[image, y div 2, x div 2, chan],
         0.0
-      )
-    )
-    result.lock()
+      ) | (image, y, x, chan)
+  result.lock()
 
 proc avgpool2*(images: Fun): Fun {.layer.} =
-  iters image, y, x, chan:
-    result[image, y, x, chan] ++= (
-      images[image, y * 2, x * 2, chan] +
-      images[image, y * 2 + 1, x * 2, chan] +
-      images[image, y * 2, x * 2 + 1, chan] +
-      images[image, y * 2 + 1, x * 2 + 1, chan]
-    ) / 4.0
+  result[image, y, x, chan] ++= (
+    images[image, y * 2, x * 2, chan] +
+    images[image, y * 2 + 1, x * 2, chan] +
+    images[image, y * 2, x * 2 + 1, chan] +
+    images[image, y * 2 + 1, x * 2 + 1, chan]
+  ) / 4.0 | (image, y, x, chan)
 
 proc upsample2*(images: Fun): Fun {.layer.} =
-  # TODO
-  iters image, y, x, chan:
-    result[image, y, x, chan] ++= images[image, x div 2, y div 2, chan]
+  result[image, y, x, chan] ++= images[image, x div 2, y div 2, chan] | (image, y, x, chan)
   result.with_shape([
     images.shape[0],
     images.shape[1] * 2,
@@ -93,15 +88,13 @@ proc upsample2*(images: Fun): Fun {.layer.} =
   ])
 
 proc softmax*(inp: Fun): Fun {.layer.} =
-  iters y, x:
-    var sums: Fun
-    sums[y] ++= exp(inp[y, x])
-    sums.name = "softmax.sums"
-    result[y, x] ++= exp(inp[y, x]) / sums[y]
+  var sums: Fun
+  sums[y] ++= exp(inp[y, x]) | (y, x)
+  sums.name = "softmax.sums"
+  result[y, x] ++= exp(inp[y, x]) / sums[y] | (y, x)
 
 proc dropout*(inp: Fun, prob: float64): Fun {.layer.} =
   let rand = rand(inp, 0.0..1.0)
   rand.name = "dropout.rand"
-  iters it:
-    result{it} ++= select(prob <= rand{it}, inp{it} / (1.0 - prob), 0.0)
+  result{it} ++= select(prob <= rand{it}, inp{it} / (1.0 - prob), 0.0) | it
   result.copy_shape(inp)
