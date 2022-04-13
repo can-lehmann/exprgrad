@@ -396,18 +396,18 @@ proc ensure_init(fun: var Fun) =
   if fun.is_nil:
     fun = Fun(kind: FunResult)
 
-proc collect_children(expr: ExprBuilder, children: var seq[Fun]) =
+proc collect_children(expr: ExprBuilder, fun: Fun) =
   for child in expr.children:
-    child.collect_children(children)
+    child.collect_children(fun)
   if not expr.tensor.is_nil:
-    if expr.tensor notin children: # TODO?
-      children.add(expr.tensor)
+    if expr.tensor != fun and expr.tensor notin fun.children: # TODO?
+      fun.children.add(expr.tensor)
 
 proc add_kernel(fun: Fun, kernel: KernelBuilder) =
   if fun.kind notin {FunResult, FunEffect}:
     raise ParserError(msg: "Unable to add a kernel to a " & $fun.kind)
   fun.kernels.add(kernel)
-  collect_children(ExprBuilder(kernel.value), fun.children)
+  collect_children(ExprBuilder(kernel.value), fun)
 
 proc is_name(node: NimNode): bool =
   result = node.kind == nnkIdent or node.kind == nnkSym
@@ -545,7 +545,7 @@ proc with_shape*(fun: Fun, dims: varargs[Index, literal]) =
     raise ParserError(msg: "Cannot set shape of " & $fun.kind)
   fun.shape_constr = ShapeConstraintBuilder(kind: ShapeDims, dims: @dims)
   for dim in dims:
-    collect_children(ExprBuilder(dim), fun.children)
+    collect_children(ExprBuilder(dim), fun)
 
 macro layer*(fn: untyped): untyped =
   result = fn

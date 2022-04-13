@@ -32,8 +32,7 @@ proc load_mnist*[T](path: string):
 let (train_x, train_y, test_x, test_y) = load_mnist[float32]("data")
 
 proc gen_loss(labels: Fun): Fun =
-  iters it:
-    result[0] ++= sq(labels{it}) / to_scalar(labels.shape[0])
+  result[0] ++= sq(labels{it}) / to_scalar(labels.shape[0]) | it
 
 let
   gen = input("seed")

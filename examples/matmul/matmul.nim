@@ -15,8 +15,7 @@
 import exprgrad
 
 proc matmul(a, b: Fun): Fun =
-  iters x, y, it:
-    result[y, x] ++= a[y, it] * b[it, x]
+  result[y, x] ++= a[y, it] * b[it, x] | (x, y, it)
 
 let model = compile[float32](matmul(input("a"), input("b")).target("matmul"))
 
