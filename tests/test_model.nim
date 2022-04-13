@@ -19,7 +19,17 @@ import exprgrad
 import ../tools/test_framework
 
 test "matmul":
-  c*[y, x] ++= input("a")[y, it] * input("b")[it, x] | (x, y, it)
+  let
+    a = input("a")
+    b = input("b")
+  c*[y, x] ++= a[y, it] * b[it, x] | (x, y, it) do:
+    schedule:
+      parallel(y)
+      gpu:
+        parallel(x)
+        cache(a)
+        cache(b)
+        tile_size(it, 16)
   let model = compile[float32](c.target("c"))
   block:
     let

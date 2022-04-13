@@ -116,6 +116,14 @@ type
   
   LoopMode* = enum LoopNone, LoopIndependent, LoopParallel
   
+  TensorSchedule* = object
+    cache*: bool
+  
+  LoopSchedule* = object
+    tile_size*: int
+    tile*: bool
+    parallel*: bool
+  
   Loop* = object
     iter*: RegId
     mode*: LoopMode
@@ -123,6 +131,7 @@ type
     start*: LinearIndex
     stop*: LinearIndex
     fuse_next*: bool
+    schedule*: LoopSchedule
   
   TensorOpKind* = enum OpRead, OpWrite
   TensorOp* = object
@@ -130,6 +139,7 @@ type
     is_raw*: bool
     dims*: seq[LinearIndex]
     data*: RegId
+    schedule*: TensorSchedule
   
   ShapeConstrKind* = enum
     ShapeNone, ShapeDims, ShapeLinear, ShapeCopy
@@ -224,6 +234,13 @@ type
 
 const
   SIDE_EFFECT_INSTRS* = {InstrWrite, InstrLoop, InstrThreads}
+  ALL_COMPILE_TARGETS* = static:
+    var targets: set[CompileTarget] = {}
+    for target in low(CompileTarget)..high(CompileTarget):
+      targets.incl(target)
+    targets
+  DEFAULT_LOOP_SCHEDULE* = LoopSchedule(tile_size: 16)
+  DEFAULT_TENSOR_SCHEDULE* = TensorSchedule()
 
 proc `<`*(a, b: LoopMode): bool = ord(a) < ord(b)
 proc `<=`*(a, b: LoopMode): bool = ord(a) <= ord(b)

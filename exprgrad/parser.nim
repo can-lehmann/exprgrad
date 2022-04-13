@@ -45,7 +45,8 @@ type
   Array*[T] = distinct ExprBuilder
   
   Schedule = ref object
-    discard
+    tensors: Table[Fun, TensorSchedule]
+    loops: Table[string, LoopSchedule]
   
   KernelBuilder = ref object
     target: Fun
@@ -55,7 +56,7 @@ type
     has_custom_grad: bool
     grads: seq[KernelBuilder]
     block_count: int
-    schedule: Schedule
+    schedules: array[CompileTarget, Schedule]
   
   ShapeConstraintBuilder* = object
     case kind: ShapeConstrKind:
@@ -124,6 +125,8 @@ type BuildContext = object
   grads: Table[TensorId, TensorId]
   block_count: int
   max_tensor: TensorId
+  schedule: Schedule
+  compile_target: CompileTarget
 
 proc alloc_block(ctx: var BuildContext): int =
   result = ctx.block_count
@@ -209,6 +212,7 @@ proc clear(builder: KernelBuilder) =
 proc build(builder: KernelBuilder, ctx: var BuildContext): Kernel =
   result = Kernel()
   ctx.kernel = result
+  ctx.schedule = builder.schedules[ctx.compile_target]
   result.expr = ExprBuilder(builder.value).build_expr(ctx)
   result.write = TensorOp(
     tensor: ctx.lookup_tensor(builder.target),
@@ -222,17 +226,20 @@ proc build(builder: KernelBuilder, ctx: var BuildContext): Kernel =
     var grads = init_table[TensorId, TensorId]()
     for grad in builder.grads:
       grad.clear()
-      var grad_ctx = BuildContext(grads: grads)
+      var grad_ctx = BuildContext(
+        grads: grads,
+        compile_target: ctx.compile_target
+      )
       result.grad.kernels.add(grad.build(grad_ctx))
       grads = grad_ctx.grads
     result.grad.tensors = grads
 
-proc build(builder: KernelBuilder): Kernel =
+proc build(builder: KernelBuilder, compile_target: CompileTarget): Kernel =
   builder.clear()
-  var ctx = BuildContext()
+  var ctx = BuildContext(compile_target: compile_target)
   result = builder.build(ctx)
 
-proc hash(fun: Fun): Hash = hash(fun[].addr)
+proc hash*(fun: Fun): Hash = hash(fun[].addr)
 
 proc alloc_tensors(fun: Fun, program: Program) =
   if fun.tensor == TensorId(0):
@@ -301,7 +308,7 @@ proc flatten(fun: Fun, target: var Target) =
     case fun.kind:
       of FunResult, FunEffect:
         for kernel in fun.kernels:
-          target.kernels.add(kernel.build())
+          target.kernels.add(kernel.build(target.compile_target))
         case fun.shape_constr.kind:
           of ShapeCopy:
             target.shapes.add(ShapeConstraint(kind: ShapeCopy,
@@ -415,6 +422,12 @@ proc is_name(node: NimNode): bool =
 proc is_name(node: NimNode, name: string): bool =
   result = node.is_name and nim_ident_normalize(node.str_val) == nim_ident_normalize(name)
 
+proc new_dot_expr(node: NimNode, field: string): NimNode =
+  result = new_tree(nnkDotExpr, node, ident(field))
+
+proc new_bracket_expr(node, index: NimNode): NimNode =
+  result = new_tree(nnkBracketExpr, node, index)
+
 proc new_obj_constr(typ: NimNode, attrs: openArray[(string, NimNode)]): NimNode =
   result = new_tree(nnkObjConstr, typ)
   for (name, value) in attrs:
@@ -445,13 +458,77 @@ proc parse_target(node: NimNode): TargetInfo =
     else:
       error("Invalid target: " & node.repr)
 
-type KernelAttrs = object
-  has_custom_grad: bool
-  custom_grad: seq[NimNode]
-  schedule: Schedule
+type
+  ScheduleDef = ref object
+    tensors: Table[string, TensorSchedule]
+    loops: Table[string, LoopSchedule]
+  
+  KernelAttrs = object
+    has_custom_grad: bool
+    custom_grad: seq[NimNode]
+    schedules: array[CompileTarget, ScheduleDef]
 
-proc parse_schedule(node: NimNode): Schedule =
-  result = Schedule()
+proc lookup_loop(schedule: ScheduleDef, iter_name: string): var LoopSchedule =
+  let name = iter_name.nim_ident_normalize()
+  if name notin schedule.loops:
+    schedule.loops[name] = DEFAULT_LOOP_SCHEDULE
+  result = schedule.loops[name]
+
+proc lookup_tensor(schedule: ScheduleDef, tensor_name: string): var TensorSchedule =
+  let name = tensor_name.nim_ident_normalize()
+  if name notin schedule.tensors:
+    schedule.tensors[name] = DEFAULT_TENSOR_SCHEDULE
+  result = schedule.tensors[name]
+
+const TARGET_NAMES = block:
+  var names: seq[string] = @[]
+  for target in ALL_COMPILE_TARGETS:
+    names.add(($target)[len("Compile")..^1].to_lower_ascii().nim_ident_normalize())
+  names
+
+proc parse_schedules(node: NimNode,
+                     schedules: array[CompileTarget, ScheduleDef],
+                     targets: set[CompileTarget]) =
+  for child in node:
+    if child.kind == nnkDiscardStmt:
+      continue
+    assert child.kind in nnkCallKinds
+    assert child[0].is_name
+    
+    template property(body: untyped) =
+      for target in targets:
+        let schedule {.inject.} = schedules[target]
+        body
+    
+    let name = nim_ident_normalize(child[0].str_val)
+    case name:
+      of TARGET_NAMES:
+        let target = parse_enum[CompileTarget]("Compile" & name)
+        if target notin targets:
+          raise ParserError(msg: "Unreachable schedule condition")
+        child[^1].parse_schedules(schedules, {target})
+      of "cache":
+        property:
+          schedule.lookup_tensor(child[1].str_val).cache = true
+      of "tile":
+        property:
+          schedule.lookup_loop(child[1].str_val).tile = true
+      of "tilesize":
+        property:
+          schedule.lookup_loop(child[1].str_val).tile_size = child[2].int_val.int
+      of "parallel":
+        property:
+          for it in 1..<child.len:
+            let arg = child[it]
+            assert arg.is_name
+            schedule.lookup_loop(arg.str_val).parallel = true
+      else:
+        raise ParserError(msg: "Unknown schedule property " & $name)
+
+proc parse_schedules(node: NimNode): array[CompileTarget, ScheduleDef] =
+  for target, schedule in result.mpairs:
+    schedule = ScheduleDef()
+  node.parse_schedules(result, ALL_COMPILE_TARGETS)
 
 proc gen_kernel_builder(target: TargetInfo, value_node: NimNode, attrs: KernelAttrs): NimNode
 
@@ -474,11 +551,28 @@ proc parse_attrs(node: NimNode): KernelAttrs =
             let target = kernel_node[1].parse_target()
             result.custom_grad.add(gen_kernel_builder(target, kernel_node[2], attrs))
         of "schedule":
-          result.schedule = node[^1].parse_schedule()
+          result.schedules = child[^1].parse_schedules()
         else:
           raise ParserError(msg: $child[0].name & " is not a valid kernel attribute")
     elif child.kind != nnkDiscardStmt:
       raise ParserError(msg: $child.kind & " is not a valid kernel attribute")
+
+proc new_lit(schedule: ScheduleDef): NimNode =
+  if schedule.is_nil:
+    return new_obj_constr(bind_sym("Schedule"), [])
+  result = new_nim_node(nnkStmtListExpr)
+  let name = gen_sym()
+  result.add(new_let_stmt(name, new_obj_constr(bind_sym("Schedule"), {
+    "loops": new_lit(schedule.loops)
+  })))
+  for tensor_name, tensor_schedule in schedule.tensors:
+    result.add(new_call(bind_sym("[]="),
+      name.new_dot_expr("tensors"),
+      ident(tensor_name),
+      new_lit(tensor_schedule)
+    ))
+  result.add(name)
+  result = new_tree(nnkBlockStmt, new_empty_node(), result)
 
 proc gen_kernel_builder(target: TargetInfo, value_node: NimNode, attrs: KernelAttrs): NimNode =
   var dims: seq[NimNode] = @[]
@@ -503,7 +597,8 @@ proc gen_kernel_builder(target: TargetInfo, value_node: NimNode, attrs: KernelAt
     "target": target.tensor,
     "dims": new_call(bind_sym("@"), new_tree(nnkBracket, dims)),
     "is_raw": new_lit(target.is_raw),
-    "value": value
+    "value": value,
+    "schedules": new_lit(attrs.schedules)
   }
   if attrs.has_custom_grad:
     fields.add(("has_custom_grad", new_lit(true)))
