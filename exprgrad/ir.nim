@@ -130,6 +130,7 @@ type
     has_bounds*: bool
     start*: LinearIndex
     stop*: LinearIndex
+    step*: int
     fuse_next*: bool
     schedule*: LoopSchedule
   
@@ -215,7 +216,7 @@ type
     StageTensors, # Tensor lookups are available (Program.inputs, Program.params, Program.caches)
     StageCollected, # Required tensors are collected into target.tensors
     StageShapes, # Shape constraints are available for all kernels
-    StageBounds, # All loop bounds are inferred
+    StageBounds, # All loop bounds (Loop.start, Loop.stop, Loop.step) are inferred
     StageTensorInstrs, # Tensor access operators are converted to instructions
     StageSortedShapes, # Shape constraint order is known. This stage should only be used in addition to StageConstraints, not insted of it.
     StageStaticShapes, # All static shapes are inferred
@@ -233,7 +234,7 @@ type
     scalar_type*: ScalarType
 
 const
-  SIDE_EFFECT_INSTRS* = {InstrWrite, InstrLoop, InstrThreads}
+  SIDE_EFFECT_INSTRS* = {InstrWrite, InstrLoop, InstrIf, InstrThreads, InstrGpu}
   ALL_COMPILE_TARGETS* = static:
     var targets: set[CompileTarget] = {}
     for target in low(CompileTarget)..high(CompileTarget):
@@ -287,7 +288,10 @@ proc `$`*(typ: Type): string =
     result &= ":" & $typ.count
 
 proc `==`*(a, b: Type): bool =
-  if a.kind == b.kind and a.count == b.count:
+  if a.is_nil and b.is_nil:
+    result = true
+  elif not a.is_nil and not b.is_nil and
+       a.kind == b.kind and a.count == b.count:
     case a.kind:
       of TypeIndex, TypeScalar, TypeBoolean:
         result = true

@@ -231,12 +231,15 @@ proc compile*(program: Program) =
   program.reorder_loops()
   program.choose_parallel()
   program.fuse_loops()
+  program.tile_loops()
   program.inline_tensor_ops()
   program.inline_static_shapes()
-  program.lift_shape_instrs()
   program.unfold_loop_bounds()
   program.inline_conditions()
   program.inline_loops()
+  program.lift_invariants()
+  program.collect_closures()
+  #echo $program.targets["c"]
   program.infer_types()
 
 proc compile*[T](graphs: varargs[Fun]): Model[T] =

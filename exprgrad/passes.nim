@@ -499,7 +499,8 @@ proc generate*(program: Program) =
                 stop: LinearIndex(
                   setup: @[Instr(kind: InstrLen, tensor: loss, res: RegId(3))],
                   factors: to_table({RegId(3): 1})
-                )
+                ),
+                step: 1
               )],
               expr: Expr(
                 instrs: @[Instr(kind: InstrScalar, scalar_lit: 1, res: RegId(1))],
@@ -564,7 +565,8 @@ proc generate*(program: Program) =
                   tensor: kernel.generator.tensor, res: RegId(3)
                 )],
                 factors: to_table({RegId(3): 1})
-              )
+              ),
+              step: 1
             )],
             reads: @[TensorOp(
               tensor: kernel.generator.tensor,
@@ -843,6 +845,7 @@ proc unfold_inplace(index: var LinearIndex, regs: var seq[Register]) =
   let expr = index.unfold(regs)
   index.setup = expr.instrs
   index.factors = to_table({expr.res: 1})
+  index.constant = 0
 
 proc unfold_loop_bounds*(program: Program) =
   program.assert_pass("unfold_loop_bounds",
@@ -886,6 +889,7 @@ proc use_bounds(loop: var Loop, op: TensorOp, dim: int, regs: var seq[Register])
     loop.stop.setup = @[Instr(kind: InstrShape,
       tensor: op.tensor, dim: dim, res: size
     )]
+  loop.step = 1
 
 proc infer_loop_bounds*(program: Program) =
   program.assert_pass("infer_loop_bounds",
@@ -1346,32 +1350,6 @@ proc make_tensor_lookups*(program: Program) =
       of TensorCache: program.caches.add(id)
       else: discard
 
-proc lift_shape_instrs(kernel: Kernel) =
-  var it = 0
-  while it < kernel.expr.instrs.len:
-    let instr = kernel.expr.instrs[it]
-    case instr.kind:
-      of InstrShape, InstrLen, InstrShapeLen, InstrEpoch:
-        kernel.setup.add(instr)
-        kernel.expr.instrs.delete(it)
-      else:
-        it += 1
-
-proc lift_shape_instrs*(program: Program) =
-  program.assert_pass("lift_shape_instrs",
-    produces={},
-    requires={StageTensorInstrs},
-    preserves={
-      StageTyped, StageFolded, StageGenerated,
-      StageTensors, StageShapes, StageSortedShapes, StageBounds,
-      StageTensorInstrs
-    }
-  )
-  
-  for name, target in program.targets:
-    for kernel in target.kernels:
-      kernel.lift_shape_instrs()
-
 proc identify_independent*(kernel: Kernel) =
   var independent = init_hash_set[RegId]()
   for dim in kernel.write.dims:
@@ -1639,6 +1617,54 @@ proc inline_conditions*(program: Program) =
     for kernel in target.kernels:
       kernel.inline_conditions()
 
+proc tile_loops(kernel: Kernel) =
+  var it = 0
+  while it < kernel.loops.len:
+    let loop = kernel.loops[it]
+    if loop.schedule.tile and loop.mode < LoopParallel:
+      let
+        outer = Loop(
+          iter: kernel.regs.alloc(),
+          mode: loop.mode,
+          has_bounds: true,
+          start: loop.start,
+          stop: loop.stop,
+          step: loop.schedule.tile_size,
+          schedule: loop.schedule
+        )
+        inner = Loop(
+          iter: loop.iter,
+          mode: LoopNone,
+          has_bounds: true,
+          start: LinearIndex(
+            factors: to_table({outer.iter: 1})
+          ),
+          stop: LinearIndex(
+            factors: to_table({outer.iter: 1}), # TODO: Check if in bounds
+            constant: loop.schedule.tile_size
+          ),
+          step: 1,
+          schedule: DEFAULT_LOOP_SCHEDULE
+        )
+      kernel.loops.delete(it)
+      kernel.loops.insert([outer, inner], it)
+      it += 2
+    else:
+      it += 1
+
+proc tile_loops*(program: Program) =
+  program.assert_pass("tile_loops",
+    requires = {StageBounds, StageFolded},
+    preserves = {
+      StageBounds, StageFolded, StageStaticShapes, StageGenerated,
+      StageTensors, StageShapes, StageSortedShapes
+    }
+  )
+  
+  for name, target in program.targets:
+    for kernel in target.kernels:
+      kernel.tile_loops()
+
 proc collect_used(instrs: seq[Instr]): HashSet[RegId] =
   for instr in instrs:
     for arg in instr.args:
@@ -1655,30 +1681,15 @@ proc collect_defined(instrs: seq[Instr]): HashSet[RegId] =
 
 proc inline_loop(kernel: Kernel, compile_target: CompileTarget) =
   let loop = kernel.loops.pop()
-  kernel.setup.add(loop.start.setup)
-  kernel.setup.add(loop.stop.setup)
   if loop.mode >= LoopParallel:
-    var closure = ParallelClosure()
-    let
-      used = kernel.expr.instrs.collect_used()
-      defined = kernel.setup.collect_defined()
-    for reg in used:
-      if reg in defined:
-        closure.regs.add(reg)
-    
-    var tensors: seq[TensorId] = @[]
-    for tensor in kernel.expr.instrs.collect_tensors():
-      closure.tensors.add(tensor)
-    
     case compile_target:
       of CompileCpu:
         raise StageError(msg: "Parallel loops are not supported by CPU target")
       of CompileThreads:
         let (range_begin, range_end) = (kernel.regs.alloc(), kernel.regs.alloc())
         kernel.expr.instrs = @[Instr(kind: InstrThreads,
-          args: @[loop.start.setup[^1].res, loop.stop.setup[^1].res],
+          args: @[loop.start.only_register, loop.stop.only_register],
           threads_begin: range_begin, threads_end: range_end,
-          threads_closure: closure,
           body: @[Instr(kind: InstrLoop,
             args: @[range_begin, range_end],
             loop_iter: loop.iter,
@@ -1688,17 +1699,14 @@ proc inline_loop(kernel: Kernel, compile_target: CompileTarget) =
       of CompileGpu:
         var
           instr = Instr(kind: InstrGpu,
-            args: @[loop.start.setup[^1].res, loop.stop.setup[^1].res],
-            gpu_closure: closure
+            args: @[loop.start.only_register, loop.stop.only_register]
           )
           loops = @[loop]
         while kernel.loops.len > 0 and
               kernel.loops[^1].mode >= LoopParallel:
           let loop = kernel.loops.pop()
           loops.add(loop)
-          kernel.setup.add(loop.start.setup)
-          kernel.setup.add(loop.stop.setup)
-          instr.args.add([loop.start.setup[^1].res, loop.stop.setup[^1].res])
+          instr.args.add([loop.start.only_register, loop.stop.only_register])
         
         var conds: seq[RegId] = @[]
         for it, loop in loops:
@@ -1729,7 +1737,6 @@ proc inline_loop(kernel: Kernel, compile_target: CompileTarget) =
             let
               is_in_range = kernel.regs.alloc()
               max = loop.stop.setup[^1].res
-            instr.gpu_closure.regs.add(max)
             instr.body.add(Instr(kind: InstrLt,
               args: @[loop.iter, max],
               res: is_in_range
@@ -1753,13 +1760,19 @@ proc inline_loop(kernel: Kernel, compile_target: CompileTarget) =
           instr.body.add(kernel.expr.instrs)
         
         kernel.expr.instrs = @[instr]
+        for loop in loops:
+          kernel.expr.instrs.insert(loop.start.setup)
+          kernel.expr.instrs.insert(loop.stop.setup)
+        return
   else:
     kernel.expr.instrs = @[Instr(kind: InstrLoop,
-      args: @[loop.start.setup[^1].res, loop.stop.setup[^1].res],
+      args: @[loop.start.only_register, loop.stop.only_register],
       loop_iter: loop.iter,
       loop_fuse_next: loop.fuse_next,
       body: kernel.expr.instrs
     )]
+  kernel.expr.instrs.insert(loop.start.setup)
+  kernel.expr.instrs.insert(loop.stop.setup)
 
 proc inline_loops(target: var Target, cur, until_level: int) =
   let kernel = target.kernels[cur]
@@ -1805,3 +1818,112 @@ proc inline_loops*(program: Program) =
     for kernel in target.kernels:
       kernel.setup.add(kernel.expr.instrs)
       kernel.expr = Expr()
+
+proc lift_invariants(instrs: var seq[Instr],
+                     regs: var seq[int],
+                     levels: var seq[seq[Instr]],
+                     min_level: int) =
+  var it = 0
+  while it < instrs.len:
+    let instr = instrs[it]
+    if instr.body.len > 0:
+      levels.add(@[])
+      var body_min_level = min_level
+      case instr.kind:
+        of InstrLoop:
+          regs[instr.loop_iter] = levels.len
+        of InstrThreads:
+          regs[instr.threads_begin] = levels.len
+          regs[instr.threads_end] = levels.len
+          body_min_level = levels.len
+        of InstrGpu:
+          for index in instr.gpu_indices:
+            regs[index.local] = levels.len
+            regs[index.group] = levels.len
+          body_min_level = levels.len
+        else: discard
+      instrs[it].body.lift_invariants(regs, levels, body_min_level)
+      let level = levels.pop()
+      instrs.insert(level, it)
+      it += level.len
+    elif instr.kind notin SIDE_EFFECT_INSTRS:
+      var instr_level = 0
+      if instr.kind notin {InstrShape, InstrLen, InstrShapeLen}:
+        instr_level = min_level
+      
+      for arg in instr.args:
+        if regs[arg] > instr_level:
+          instr_level = regs[arg]
+      
+      if instr.res != RegId(0):
+        regs[instr.res] = instr_level
+      
+      if instr_level < levels.len:
+        levels[instr_level].add(instr)
+        instrs.delete(it)
+        continue
+    else:
+      if instr.res != RegId(0):
+        regs[instr.res] = levels.len 
+    it += 1
+
+proc lift_invariants*(program: Program) =
+  program.assert_pass("lift_invariants",
+    produces={},
+    requires={StageTensorInstrs},
+    preserves={
+      StageGenerated, StageTensors, StageShapes,
+      StageSortedShapes, StageBounds,
+      StageTensorInstrs, StageLoops, StageConditions
+    }
+  )
+  
+  for name, target in program.targets:
+    for kernel in target.kernels:
+      var
+        regs = new_seq[int](kernel.regs.len)
+        levels: seq[seq[Instr]] = @[]
+      kernel.setup.lift_invariants(regs, levels, 0)
+
+proc collect_closures(instrs: var seq[Instr], regs: var seq[int], level: int): HashSet[RegId] =
+  for instr in instrs.mitems:
+    var used = instr.body.collect_closures(regs, level + 1)
+    
+    if instr.kind in {InstrThreads, InstrGpu}:
+      var closure = ParallelClosure()
+      for reg in used:
+        if regs[reg] <= level:
+          closure.regs.add(reg)
+      
+      var tensors: seq[TensorId] = @[]
+      for tensor in instr.body.collect_tensors():
+        closure.tensors.add(tensor)
+      
+      case instr.kind:
+        of InstrThreads: instr.threads_closure = closure
+        of InstrGpu: instr.gpu_closure = closure
+        else: discard
+    
+    for arg in instr.args:
+      used.incl(arg)
+    
+    if instr.res != RegId(0):
+      regs[instr.res] = level
+    
+    result = result.union(used)
+
+proc collect_closures*(program: Program) =
+  program.assert_pass("collect_closures",
+    produces={},
+    requires={StageLoops},
+    preserves={
+      StageGenerated, StageTensors, StageShapes,
+      StageSortedShapes, StageBounds,
+      StageTensorInstrs, StageLoops, StageConditions
+    }
+  )
+  
+  for name, target in program.targets:
+    for kernel in target.kernels:
+      var regs = new_seq[int](kernel.regs.len)
+      discard kernel.setup.collect_closures(regs, 0)
