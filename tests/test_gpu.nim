@@ -14,13 +14,13 @@
 
 # Unit-tests for compiling exprgrad kernels to the GPU
 
-import std/tables
+import std/[tables, sequtils]
 import exprgrad/[ir, irprint, model, parser, dsl]
 import ../tools/test_framework
 
 test "matmul":
   let
-    a = input("a")
+    a = input("a", [1024, -1])
     b = input("b")
   c*[y, x] ++= a[y, it] * b[it, x] | (x, y, it) do:
     schedule:
@@ -36,3 +36,19 @@ test "matmul":
   let program = to_program([c.target("c", CompileGpu)])
   program.compile()
   echo program.targets["c"]
+
+test "static_shapes":
+  for (size, expect_bounds_cond) in [(1024, false), (512, false), (123, true), (8, true)]:
+    let
+      a = input("a", [size, size])
+      b = input("b", [size, size])
+    c*[y, x] ++= a[y, it] * b[it, x] | (x, y, it) do:
+      schedule:
+        tile_size(x, 16)
+        tile_size(y, 16)
+        tile_size(it, 16)
+    let program = to_program([c.target("c", CompileGpu)])
+    program.compile()
+    let has_bounds_cond = program.targets["c"].kernels[0].setup
+      .any_it(it.kind == InstrGpu and it.body.any_it(it.kind == InstrIf))
+    check has_bounds_cond == expect_bounds_cond

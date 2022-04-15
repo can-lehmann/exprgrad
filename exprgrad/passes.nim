@@ -1724,16 +1724,17 @@ proc inline_loop(kernel: Kernel, compile_target: CompileTarget) =
           ))
           instr.gpu_indices.add(index)
           
-          # TODO: Check if shape is static
-          let
-            is_in_range = kernel.regs.alloc()
-            max = loop.stop.setup[^1].res
-          instr.gpu_closure.regs.add(max)
-          instr.body.add(Instr(kind: InstrLt,
-            args: @[loop.iter, max],
-            res: is_in_range
-          ))
-          conds.add(is_in_range)
+          if loop.stop.setup[^1].kind != InstrIndex or
+             loop.stop.setup[^1].index_lit mod index.size != 0:
+            let
+              is_in_range = kernel.regs.alloc()
+              max = loop.stop.setup[^1].res
+            instr.gpu_closure.regs.add(max)
+            instr.body.add(Instr(kind: InstrLt,
+              args: @[loop.iter, max],
+              res: is_in_range
+            ))
+            conds.add(is_in_range)
         
         if conds.len > 0:
           var cond = conds[0]
