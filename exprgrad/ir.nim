@@ -146,12 +146,15 @@ type
     min*: int
     max*: int
   
+  OffsetInterval* = object
+    offset*: LinearIndex
+    interval*: Interval
+  
   LocalCache* = object
     exists*: bool
     reg*: RegId
     level*: int
-    offset*: seq[LinearIndex]
-    size*: seq[Interval]
+    dims*: seq[OffsetInterval]
   
   TensorOpKind* = enum OpRead, OpWrite
   TensorOp* = object
@@ -581,3 +584,14 @@ proc eval*(index: LinearIndex, values: Table[RegId, int]): int =
   result = index.constant
   for reg, factor in index.factors:
     result += factor * values[reg]
+
+# Interval arithmetic
+
+proc `+`*(a, b: Interval): Interval =
+  result = Interval(min: a.min + b.min, max: a.max + b.max)
+
+proc `*`*(a: Interval, b: int): Interval =
+  if b < 0:
+    result = Interval(min: b * a.max, max: b * a.min)
+  else:
+    result = Interval(min: b * a.min, max: b * a.max)

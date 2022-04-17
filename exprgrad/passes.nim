@@ -208,7 +208,7 @@ proc fold_setup(index: var LinearIndex, kernel: Kernel) =
       regs[instr.res] = op(regs[instr.args[0]])
     
     case instr.kind:
-      of InstrIndex: regs[instr.res] = LinearIndex(constant: instr.index_lit)
+      of InstrIndex: regs[instr.res] = init_linear_index(instr.index_lit)
       of InstrAdd: binary_op(`+`)
       of InstrSub: binary_op(`-`)
       of InstrMul: binary_op(`*`)
@@ -522,7 +522,7 @@ proc generate*(program: Program) =
               write: TensorOp(
                 is_raw: true,
                 tensor: grad_loss,
-                dims: @[LinearIndex(factors: to_table({RegId(2): 1}))],
+                dims: @[init_linear_index(RegId(2))],
                 data: RegId(1)
               )
             ))
@@ -583,14 +583,14 @@ proc generate*(program: Program) =
             )],
             reads: @[TensorOp(
               tensor: kernel.generator.tensor,
-              dims: @[LinearIndex(factors: to_table({RegId(2): 1}))],
+              dims: @[init_linear_index(RegId(2))],
               data: RegId(1),
               is_raw: true
             )],
             expr: Expr(res: RegId(1)),
             write: TensorOp(
               tensor: kernel.write.tensor,
-              dims: @[LinearIndex(factors: to_table({RegId(2): 1}))],
+              dims: @[init_linear_index(RegId(2))],
               data: RegId(1),
               is_raw: true
             )
@@ -605,7 +605,7 @@ proc generate*(program: Program) =
               prod *= size
           for dim, size in kernel.generator.reshape:
             if size >= 0:
-              shape.dims.add(LinearIndex(constant: size))
+              shape.dims.add(init_linear_index(size))
             else:
               shape.dims.add(LinearIndex(
                 setup: @[
@@ -787,11 +787,9 @@ proc inline_tensor_ops(kernel: Kernel, has_written: var seq[bool]) =
             dims: seq[LinearIndex] = @[]
             cache_shape: seq[int] = @[]
           for it, dim in tensor_op.dims:
-            let
-              interval = tensor_op.cache.size[it]
-              offset = tensor_op.cache.offset[it]
-            dims.add(dim - offset - LinearIndex(constant: interval.min))
-            cache_shape.add(interval.max - interval.min + 1)
+            let cache_dim = tensor_op.cache.dims[it]
+            dims.add(dim - cache_dim.offset - init_linear_index(cache_dim.interval.min))
+            cache_shape.add(cache_dim.interval.max - cache_dim.interval.min + 1)
           expand_tensor_index(dims, tensor_op.tensor, kernel.regs, cache_shape)
         else:
           expand_tensor_index(tensor_op.dims, tensor_op.tensor, kernel.regs)
@@ -918,9 +916,9 @@ proc only_register*(linear: LinearIndex): RegId =
 
 proc use_bounds(loop: var Loop, op: TensorOp, dim: int, regs: var seq[Register]) =
   loop.has_bounds = true
-  loop.start = LinearIndex(constant: 0)
+  loop.start = init_linear_index(0)
   let size = regs.alloc()
-  loop.stop = LinearIndex(factors: to_table({size: 1}))
+  loop.stop = init_linear_index(size)
   if op.is_raw:
     loop.stop.setup = @[Instr(kind: InstrLen,
       tensor: op.tensor, res: size
@@ -1565,7 +1563,7 @@ proc nest_elementwise_map(kernel: Kernel, tensors: seq[TensorDef]) =
   var iters: seq[LinearIndex] = @[]
   for dim, size in tensors[tensor_id].shape:
     let iter = kernel.regs.alloc()
-    iters.add(LinearIndex(factors: to_table({iter: 1})))
+    iters.add(init_linear_index(iter))
     kernel.loops.add(Loop(iter: iter, has_bounds: true))
     kernel.loops[^1].use_bounds(kernel.reads[0], dim, kernel.regs)
   kernel.reads[0].dims = iters
@@ -1713,19 +1711,6 @@ proc bounds_size(loop: Loop): int =
   else:
     result = size.constant
 
-type OffsetInterval = object
-  offset: LinearIndex
-  interval: Interval
-
-proc `+`(a, b: Interval): Interval =
-  result = Interval(min: a.min + b.min, max: a.max + b.max)
-
-proc `*`(a: Interval, b: int): Interval =
-  if b < 0:
-    result = Interval(min: b * a.max, max: b * a.min)
-  else:
-    result = Interval(min: b * a.min, max: b * a.max)
-
 proc eval(index: LinearIndex, regs: Table[RegId, OffsetInterval]): OffsetInterval =
   result.interval.min += index.constant
   result.interval.max += index.constant
@@ -1758,7 +1743,7 @@ proc infer_cache_sizes(kernel: Kernel, compile_target: CompileTarget) =
           if loop.group == RegId(0):
             loop.group = kernel.regs.alloc()
           regs[loop.iter] = OffsetInterval(
-            offset: LinearIndex(factors: to_table({loop.group: 1})),
+            offset: init_linear_index(loop.group),
             interval: Interval(min: 0, max: loop.schedule.tile_size - 1)
           )
     
@@ -1772,9 +1757,7 @@ proc infer_cache_sizes(kernel: Kernel, compile_target: CompileTarget) =
       )
       if read.schedule.cache:
         for dim in read.dims:
-          let dim_cache = dim.eval(regs)
-          cache.offset.add(dim_cache.offset)
-          cache.size.add(dim_cache.interval)
+          cache.dims.add(dim.eval(regs))
       read.cache = cache
 
 proc infer_cache_sizes*(program: Program) =
@@ -1793,8 +1776,8 @@ proc infer_cache_sizes*(program: Program) =
 
 proc cache_tensor(read: TensorOp, regs: var seq[Register]): seq[Instr] =
   var cache_shape: seq[int] = @[]
-  for interval in read.cache.size:
-    cache_shape.add(interval.max - interval.min + 1)
+  for dim in read.cache.dims:
+    cache_shape.add(dim.interval.max - dim.interval.min + 1)
   result.add(Instr(kind: InstrSharedCache,
     cache_size: cache_shape.prod(),
     res: read.cache.reg
@@ -1806,10 +1789,10 @@ proc cache_tensor(read: TensorOp, regs: var seq[Register]): seq[Instr] =
   var
     dims: seq[LinearIndex] = @[]
     cur = iter
-  for it in countdown(read.cache.offset.len - 1, 0):
+  for it in countdown(read.cache.dims.len - 1, 0):
     let
-      interval = read.cache.size[it]
-      size = interval.max - interval.min + 1
+      dim = read.cache.dims[it]
+      size = dim.interval.max - dim.interval.min + 1
       size_reg = regs.alloc()
     
     let local_offset =
@@ -1833,11 +1816,9 @@ proc cache_tensor(read: TensorOp, regs: var seq[Register]): seq[Instr] =
         cur = new_cur
         offset
     
-    let
-      tile_offset = read.cache.offset[it]
-      dim = unfold(tile_offset + local_offset.init_linear_index(), regs)
-    body.add(dim.instrs)
-    dims.add(init_linear_index(dim.res))
+    let read_dim = unfold(dim.offset + local_offset.init_linear_index(), regs)
+    body.add(read_dim.instrs)
+    dims.add(init_linear_index(read_dim.res))
   
   let index = expand_tensor_index(dims, read.tensor, regs)
   body.add(index.instrs)
