@@ -296,10 +296,13 @@ proc to_llvm(instrs: seq[Instr], ctx: Context) =
         instr.body.to_llvm(ctx)
         discard builder.build_br(incr_block)
         
+        if instr.loop_step <= 0:
+          raise GeneratorError(msg: "Loop step size must be a positive integer.")
+        
         builder.position_builder_at_end(incr_block)
         let new_iter = builder.build_add(
           ctx[instr.loop_iter],
-          const_nim_int(1),
+          const_nim_int(instr.loop_step),
           "incr_iter"
         )
         discard builder.build_br(cond_block)

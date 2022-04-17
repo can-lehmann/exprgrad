@@ -93,8 +93,10 @@ proc stringify(instr: Instr, regs: var seq[string], level: int): string =
     of InstrScalar: result &= $instr.scalar_lit
     of InstrLoop:
       result &= "loop " & $instr.loop_iter & " in " & regs[instr.args[0]]
-      result &= "..<" & regs[instr.args[1]] & ":\n"
-      result &= instr.body.stringify(regs, level + 1)
+      result &= " to " & regs[instr.args[1]]
+      if instr.loop_step != 1:
+        result &= " step " & $instr.loop_step
+      result &= ":\n" & instr.body.stringify(regs, level + 1)
     of InstrGpu:
       result &= "gpu"
       for it, index in instr.gpu_indices:
@@ -103,7 +105,7 @@ proc stringify(instr: Instr, regs: var seq[string], level: int): string =
         else:
           result &= "\n" & make_indent(level + 2)
         result &= "(local " & $index.local & ", group " & $index.group & ", size " & $index.size & ")"
-        result &= " in " & regs[instr.args[it * 2]] & "..<" & regs[instr.args[it * 2 + 1]]
+        result &= " in " & regs[instr.args[it * 2]] & " to " & regs[instr.args[it * 2 + 1]]
       result &= ":\n"
       result &= instr.body.stringify(regs, level + 1)
     of InstrIf:
@@ -111,6 +113,8 @@ proc stringify(instr: Instr, regs: var seq[string], level: int): string =
       result &= instr.body.stringify(regs, level + 1)
     of InstrShape:
       result &= $instr.tensor & ".shape[" & $instr.dim & "]"
+    of InstrSharedCache:
+      result &= "shared_cache[" & $instr.cache_size & "]"
     of InstrAdd, InstrSub, InstrMul, InstrDiv, InstrIndexDiv, InstrMod,
        InstrEq, InstrLt, InstrLe, InstrAnd, InstrOr:
       const OPERATORS = [
@@ -194,7 +198,9 @@ proc stringify(kernel: Kernel, level: int): string =
           result &= ",\n" & make_indent(level + 1) & make_indent(6, 1)
         result &= $loop.iter
         if loop.has_bounds:
-          result &= " in " & loop.start.stringify(regs) & "..<" & loop.stop.stringify(regs)
+          result &= " in " & loop.start.stringify(regs) & " to " & loop.stop.stringify(regs)
+          if loop.step != 1:
+            result &= " step " & $loop.step
     result &= ":"
     for read in kernel.reads:
       result &= "\n" & read.stringify(OpRead, regs, level + 2)

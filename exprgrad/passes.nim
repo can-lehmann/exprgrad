@@ -1846,6 +1846,7 @@ proc cache_tensor(read: TensorOp, regs: var seq[Register]): seq[Instr] =
   result.add(Instr(kind: InstrLoop,
     args: @[start, stop],
     loop_iter: iter,
+    loop_step: 1,
     body: body
   ))
 
@@ -1886,6 +1887,7 @@ proc inline_loop(kernel: Kernel, compile_target: CompileTarget) =
           body: @[Instr(kind: InstrLoop,
             args: @[range_begin, range_end],
             loop_iter: loop.iter,
+            loop_step: 1,
             body: kernel.expr.instrs
           )]
         )]
@@ -1964,6 +1966,7 @@ proc inline_loop(kernel: Kernel, compile_target: CompileTarget) =
     kernel.expr.instrs = @[Instr(kind: InstrLoop,
       args: @[loop.start.only_register, loop.stop.only_register],
       loop_iter: loop.iter,
+      loop_step: loop.step,
       loop_fuse_next: loop.fuse_next,
       body: kernel.expr.instrs
     )]

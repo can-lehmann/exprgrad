@@ -92,6 +92,7 @@ type
       of InstrShape: dim*: int
       of InstrLoop:
         loop_iter*: RegId
+        loop_step*: int
         loop_fuse_next*: bool
       of InstrThreads:
         threads_closure*: ParallelClosure
