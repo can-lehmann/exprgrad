@@ -68,7 +68,7 @@ type
     # Loops
     InstrLoop, InstrThreads,
     # GPU
-    InstrGpu, InstrIf, InstrBarrier
+    InstrGpu, InstrIf, InstrBarrier, InstrSharedCache
   
   GpuIndex* = object
     local*: RegId
@@ -99,6 +99,8 @@ type
       of InstrGpu:
         gpu_closure*: ParallelClosure
         gpu_indices*: seq[GpuIndex]
+      of InstrSharedCache:
+        cache_size*: int
       else: discard
   
   Register* = object
@@ -126,6 +128,7 @@ type
   
   Loop* = object
     iter*: RegId
+    group*: RegId
     mode*: LoopMode
     has_bounds*: bool
     start*: LinearIndex
@@ -134,12 +137,23 @@ type
     fuse_next*: bool
     schedule*: LoopSchedule
   
+  Interval* = object
+    min*: int
+    max*: int
+  
+  LocalCache* = object
+    exists*: bool
+    level*: int
+    offset*: seq[LinearIndex]
+    size*: seq[Interval]
+  
   TensorOpKind* = enum OpRead, OpWrite
   TensorOp* = object
     tensor*: TensorId
     is_raw*: bool
     dims*: seq[LinearIndex]
     data*: RegId
+    cache*: LocalCache
     schedule*: TensorSchedule
   
   ShapeConstrKind* = enum
@@ -220,6 +234,7 @@ type
     StageTensorInstrs, # Tensor access operators are converted to instructions
     StageSortedShapes, # Shape constraint order is known. This stage should only be used in addition to StageConstraints, not insted of it.
     StageStaticShapes, # All static shapes are inferred
+    StageCacheSizes, # All tensor cache sizes are inferred
     StageIndependent, # All independent loops are identified
     StageConditions, # All conditions are inlined
     StageLoops # All loops are inlined
@@ -234,7 +249,7 @@ type
     scalar_type*: ScalarType
 
 const
-  SIDE_EFFECT_INSTRS* = {InstrWrite, InstrLoop, InstrIf, InstrThreads, InstrGpu}
+  SIDE_EFFECT_INSTRS* = {InstrWrite, InstrLoop, InstrIf, InstrThreads, InstrGpu, InstrBarrier}
   ALL_COMPILE_TARGETS* = static:
     var targets: set[CompileTarget] = {}
     for target in low(CompileTarget)..high(CompileTarget):

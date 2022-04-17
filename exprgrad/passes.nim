@@ -132,6 +132,12 @@ proc infer_types(instrs: seq[Instr], regs: var seq[Register]) =
         if arg_type(0).kind != TypeBoolean:
           raise TypeError(msg: "If condition must be of type Boolean")
         instr.body.infer_types(regs)
+      of InstrSharedCache:
+        ret_type = Type(kind: TypeArray,
+          count: 1,
+          len: instr.cache_size,
+          item: Type(kind: TypeScalar, count: 1)
+        )
       of InstrBarrier: discard
 
 proc infer_types(expr: Expr, regs: var seq[Register]) =
@@ -1655,6 +1661,7 @@ proc tile_loops(kernel: Kernel) =
 proc tile_loops*(program: Program) =
   program.assert_pass("tile_loops",
     requires = {StageBounds, StageFolded},
+    produces = {StageCacheSizes},
     preserves = {
       StageBounds, StageFolded, StageStaticShapes, StageGenerated,
       StageTensors, StageShapes, StageSortedShapes
@@ -1664,6 +1671,83 @@ proc tile_loops*(program: Program) =
   for name, target in program.targets:
     for kernel in target.kernels:
       kernel.tile_loops()
+
+proc bounds_size(loop: Loop): int =
+  let size = loop.stop - loop.start
+  if size.factors.len > 0:
+    result = -1
+  else:
+    result = size.constant
+
+type OffsetInterval = object
+  offset: LinearIndex
+  interval: Interval
+
+proc `+`(a, b: Interval): Interval =
+  result = Interval(min: a.min + b.min, max: a.max + b.max)
+
+proc `*`(a: Interval, b: int): Interval =
+  if b < 0:
+    result = Interval(min: b * a.max, max: b * a.min)
+  else:
+    result = Interval(min: b * a.min, max: b * a.max)
+
+proc eval(index: LinearIndex, regs: Table[RegId, OffsetInterval]): OffsetInterval =
+  result.interval.min += index.constant
+  result.interval.max += index.constant
+  for reg, factor in index.factors:
+    if reg in regs:
+      result.offset = result.offset + regs[reg].offset * factor
+      result.interval = result.interval + regs[reg].interval * factor
+    else:
+      result.offset = result.offset + LinearIndex(factors: to_table({reg: factor}))
+
+proc infer_cache_sizes(kernel: Kernel, compile_target: CompileTarget) =
+  if kernel.reads.any_it(it.schedule.cache):
+    var cache_level = kernel.loops.len
+    while cache_level > 0 and
+          kernel.loops[cache_level - 1].bounds_size >= 0:
+      cache_level -= 1
+    
+    var regs = init_table[RegId, OffsetInterval]()
+    for it in cache_level..<kernel.loops.len:
+      let loop = kernel.loops[it]
+      regs[loop.iter] = OffsetInterval(
+        offset: loop.start,
+        interval: Interval(min: 0, max: loop.bounds_size - 1)
+      )
+    if compile_target == CompileGpu:
+      for it in 0..<cache_level:
+        template loop: var Loop = kernel.loops[it]
+        if loop.mode >= LoopParallel:
+          if loop.group == RegId(0):
+            loop.group = kernel.regs.alloc()
+          regs[loop.iter] = OffsetInterval(
+            offset: LinearIndex(factors: to_table({loop.group: 1})),
+            interval: Interval(min: 0, max: loop.schedule.tile_size - 1)
+          )
+    
+    for read in kernel.reads.mitems:
+      var cache = LocalCache(exists: true, level: cache_level)
+      if read.schedule.cache:
+        for dim in read.dims:
+          let dim_cache = dim.eval(regs)
+          cache.offset.add(dim_cache.offset)
+          cache.size.add(dim_cache.interval)
+      read.cache = cache
+
+proc infer_cache_sizes*(program: Program) =
+  program.assert_pass("infer_cache_sizes",
+    requires = {StageBounds, StageFolded},
+    preserves = {
+      StageBounds, StageFolded, StageStaticShapes, StageGenerated,
+      StageTensors, StageShapes, StageSortedShapes
+    }
+  )
+  
+  for name, target in program.targets:
+    for kernel in target.kernels:
+      kernel.infer_cache_sizes(target.compile_target)
 
 proc collect_used(instrs: seq[Instr]): HashSet[RegId] =
   for instr in instrs:
@@ -1710,9 +1794,12 @@ proc inline_loop(kernel: Kernel, compile_target: CompileTarget) =
         
         var conds: seq[RegId] = @[]
         for it, loop in loops:
+          var group_index = loop.group
+          if group_index == RegId(0):
+            group_index = kernel.regs.alloc()
           let
             index = GpuIndex(
-              group: kernel.regs.alloc(),
+              group: group_index,
               local: kernel.regs.alloc(),
               size: loop.schedule.tile_size
             )

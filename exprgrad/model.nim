@@ -232,6 +232,7 @@ proc compile*(program: Program) =
   program.choose_parallel()
   program.fuse_loops()
   program.tile_loops()
+  program.infer_cache_sizes()
   program.inline_tensor_ops()
   program.inline_static_shapes()
   program.unfold_loop_bounds()

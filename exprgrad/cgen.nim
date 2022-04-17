@@ -160,7 +160,7 @@ proc to_c(instrs: seq[Instr], ctx: Context): string =
         continue
       of InstrLog, InstrThreads, 
          InstrArray, InstrArrayLen, InstrArrayRead,
-         InstrWrap, InstrGpu, InstrBarrier:
+         InstrWrap, InstrGpu, InstrBarrier, InstrSharedCache:
         raise GeneratorError(msg: "Unable to generate c source for " & $instr.kind)
     
     var stmt = ""
