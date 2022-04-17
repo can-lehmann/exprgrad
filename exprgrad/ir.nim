@@ -68,7 +68,8 @@ type
     # Loops
     InstrLoop, InstrThreads,
     # GPU
-    InstrGpu, InstrIf, InstrBarrier, InstrSharedCache
+    InstrGpu, InstrIf, InstrBarrier,
+    InstrSharedCache, InstrCacheWrite
   
   GpuIndex* = object
     local*: RegId
@@ -130,10 +131,14 @@ type
     iter*: RegId
     group*: RegId
     mode*: LoopMode
+    
     has_bounds*: bool
     start*: LinearIndex
     stop*: LinearIndex
     step*: int
+    
+    cache*: seq[Instr]
+    
     fuse_next*: bool
     schedule*: LoopSchedule
   
@@ -143,6 +148,7 @@ type
   
   LocalCache* = object
     exists*: bool
+    reg*: RegId
     level*: int
     offset*: seq[LinearIndex]
     size*: seq[Interval]
@@ -249,7 +255,11 @@ type
     scalar_type*: ScalarType
 
 const
-  SIDE_EFFECT_INSTRS* = {InstrWrite, InstrLoop, InstrIf, InstrThreads, InstrGpu, InstrBarrier}
+  SIDE_EFFECT_INSTRS* = {
+    InstrWrite,
+    InstrLoop, InstrIf, InstrThreads,
+    InstrGpu, InstrBarrier, InstrCacheWrite
+  }
   ALL_COMPILE_TARGETS* = static:
     var targets: set[CompileTarget] = {}
     for target in low(CompileTarget)..high(CompileTarget):
@@ -526,6 +536,12 @@ proc assert_analysis*(program: Program,
 
 
 # LinearIndex arithmetic
+
+proc init_linear_index*(constant: int): LinearIndex =
+  result = LinearIndex(constant: constant)
+
+proc init_linear_index*(reg: RegId): LinearIndex =
+  result = LinearIndex(factors: to_table({reg: 1}))
 
 proc `*`*(a: LinearIndex, b: int): LinearIndex =
   if b != 0:

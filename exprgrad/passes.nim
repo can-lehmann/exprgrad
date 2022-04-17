@@ -138,6 +138,13 @@ proc infer_types(instrs: seq[Instr], regs: var seq[Register]) =
           len: instr.cache_size,
           item: Type(kind: TypeScalar, count: 1)
         )
+      of InstrCacheWrite:
+        if arg_type(0).kind != TypeArray:
+          raise TypeError(msg: "Local cache must be of type Array")
+        if arg_type(1).kind != TypeIndex:
+          raise TypeError(msg: "Index into local cache must be of type Index")
+        if arg_type(2).kind != TypeScalar:
+          raise TypeError(msg: "Third argument of " & $instr.kind & " must be of type Scalar")
       of InstrBarrier: discard
 
 proc infer_types(expr: Expr, regs: var seq[Register]) =
@@ -702,7 +709,8 @@ proc unfold(linear: LinearIndex, regs: var seq[Register]): Expr =
 
 proc expand_tensor_index(dims: seq[LinearIndex],
                          tensor: TensorId,
-                         regs: var seq[Register]): Expr =
+                         regs: var seq[Register],
+                         shape: openArray[int] = []): Expr =
   var
     stride = RegId(0)
     terms = new_seq[RegId]()
@@ -724,9 +732,14 @@ proc expand_tensor_index(dims: seq[LinearIndex],
     
     if it != 0:
       let size = regs.alloc()
-      result.instrs.add(Instr(kind: InstrShape,
-        tensor: tensor, dim: it, res: size
-      ))
+      if it < shape.len and shape[it] >= 0:
+        result.instrs.add(Instr(kind: InstrIndex,
+          index_lit: shape[it], res: size
+        ))
+      else:
+        result.instrs.add(Instr(kind: InstrShape,
+          tensor: tensor, dim: it, res: size
+        ))
       if stride == RegId(0):
         stride = size
       else:
@@ -760,12 +773,29 @@ proc inline_tensor_ops(kernel: Kernel, has_written: var seq[bool]) =
   
   for kind, tensor_op in kernel.tensor_ops:
     var args = new_seq[RegId]()
+    if tensor_op.cache.exists:
+      args.add(tensor_op.cache.reg)
+    
     if tensor_op.is_raw:
       let dim = tensor_op.dims[0].unfold(kernel.regs)
       instrs[kind].add(dim.instrs)
       args.add(dim.res)
     else:
-      let index = tensor_op.dims.expand_tensor_index(tensor_op.tensor, kernel.regs)
+      let index =
+        if tensor_op.cache.exists:
+          var
+            dims: seq[LinearIndex] = @[]
+            cache_shape: seq[int] = @[]
+          for it, dim in tensor_op.dims:
+            let
+              interval = tensor_op.cache.size[it]
+              offset = tensor_op.cache.offset[it]
+            dims.add(dim - offset - LinearIndex(constant: interval.min))
+            cache_shape.add(interval.max - interval.min + 1)
+          expand_tensor_index(dims, tensor_op.tensor, kernel.regs, cache_shape)
+        else:
+          expand_tensor_index(tensor_op.dims, tensor_op.tensor, kernel.regs)
+      
       instrs[kind].add(index.instrs)
       args.add(index.res)
     
@@ -775,7 +805,11 @@ proc inline_tensor_ops(kernel: Kernel, has_written: var seq[bool]) =
       of OpWrite: args.add(tensor_op.data)
     
     let instr_kind = case kind:
-      of OpRead: InstrRead
+      of OpRead:
+        if tensor_op.cache.exists:
+          InstrArrayRead
+        else:
+          InstrRead
       of OpWrite:
         var can_overwrite = not has_written[tensor_op.tensor]
         for loop in kernel.loops:
@@ -801,7 +835,7 @@ proc inline_tensor_ops(kernel: Kernel, has_written: var seq[bool]) =
 
 proc inline_tensor_ops*(program: Program) =
   program.assert_pass("inline_tensor_ops",
-    requires={StageFolded},
+    requires={StageFolded, StageCacheSizes},
     produces={StageTensorInstrs},
     preserves={
       StageFolded, StageTensors, StageGenerated, StageBounds,
@@ -1706,6 +1740,7 @@ proc infer_cache_sizes(kernel: Kernel, compile_target: CompileTarget) =
   if kernel.reads.any_it(it.schedule.cache):
     var cache_level = kernel.loops.len
     while cache_level > 0 and
+          kernel.loops[cache_level - 1].mode < LoopParallel and
           kernel.loops[cache_level - 1].bounds_size >= 0:
       cache_level -= 1
     
@@ -1728,7 +1763,13 @@ proc infer_cache_sizes(kernel: Kernel, compile_target: CompileTarget) =
           )
     
     for read in kernel.reads.mitems:
-      var cache = LocalCache(exists: true, level: cache_level)
+      if read.is_raw:
+        continue # TODO: Support raw reads
+      var cache = LocalCache(
+        exists: true,
+        level: cache_level,
+        reg: kernel.regs.alloc()
+      )
       if read.schedule.cache:
         for dim in read.dims:
           let dim_cache = dim.eval(regs)
@@ -1739,6 +1780,7 @@ proc infer_cache_sizes(kernel: Kernel, compile_target: CompileTarget) =
 proc infer_cache_sizes*(program: Program) =
   program.assert_pass("infer_cache_sizes",
     requires = {StageBounds, StageFolded},
+    produces = {StageCacheSizes},
     preserves = {
       StageBounds, StageFolded, StageStaticShapes, StageGenerated,
       StageTensors, StageShapes, StageSortedShapes
@@ -1749,22 +1791,108 @@ proc infer_cache_sizes*(program: Program) =
     for kernel in target.kernels:
       kernel.infer_cache_sizes(target.compile_target)
 
-proc collect_used(instrs: seq[Instr]): HashSet[RegId] =
-  for instr in instrs:
-    for arg in instr.args:
-      result.incl(arg)
-    if instr.body.len > 0: 
-      result = result.union(instr.body.collect_used())
+proc cache_tensor(read: TensorOp, regs: var seq[Register]): seq[Instr] =
+  var cache_shape: seq[int] = @[]
+  for interval in read.cache.size:
+    cache_shape.add(interval.max - interval.min + 1)
+  result.add(Instr(kind: InstrSharedCache,
+    cache_size: cache_shape.prod(),
+    res: read.cache.reg
+  ))
+  
+  let iter = regs.alloc()
+  var body: seq[Instr] = @[]
+  
+  var
+    dims: seq[LinearIndex] = @[]
+    cur = iter
+  for it in countdown(read.cache.offset.len - 1, 0):
+    let
+      interval = read.cache.size[it]
+      size = interval.max - interval.min + 1
+      size_reg = regs.alloc()
+    
+    let local_offset =
+      if it == 0:
+        cur
+      else:
+        let offset = regs.alloc()
+        body.add(Instr(kind: InstrIndex,
+          index_lit: size,
+          res: size_reg
+        ))
+        body.add(Instr(kind: InstrMod,
+          args: @[cur, size_reg],
+          res: offset
+        ))
+        let new_cur = regs.alloc()
+        body.add(Instr(kind: InstrIndexDiv,
+          args: @[cur, size_reg],
+          res: new_cur
+        ))
+        cur = new_cur
+        offset
+    
+    let
+      tile_offset = read.cache.offset[it]
+      dim = unfold(tile_offset + local_offset.init_linear_index(), regs)
+    body.add(dim.instrs)
+    dims.add(init_linear_index(dim.res))
+  
+  let index = expand_tensor_index(dims, read.tensor, regs)
+  body.add(index.instrs)
+  let value = regs.alloc()
+  body.add(Instr(kind: InstrRead,
+    args: @[index.res],
+    tensor: read.tensor,
+    res: value
+  ))
+  body.add(Instr(kind: InstrCacheWrite,
+    args: @[read.cache.reg, iter, value]
+  ))
+  
+  let
+    start = regs.alloc()
+    stop = regs.alloc()
+  result.add(Instr(kind: InstrIndex,
+    index_lit: 0,
+    res: start
+  ))
+  result.add(Instr(kind: InstrIndex,
+    index_lit: cache_shape.prod(),
+    res: stop
+  ))
+  result.add(Instr(kind: InstrLoop,
+    args: @[start, stop],
+    loop_iter: iter,
+    body: body
+  ))
 
-proc collect_defined(instrs: seq[Instr]): HashSet[RegId] =
-  for instr in instrs:
-    if instr.res != RegId(0):
-      result.incl(instr.res)
-    if instr.body.len > 0: 
-      result = result.union(instr.body.collect_defined())
+proc cache_tensors*(kernel: Kernel) =
+  for read in kernel.reads:
+    if read.cache.exists:
+      let instrs = cache_tensor(read, kernel.regs)
+      if read.cache.level == 0:
+        kernel.setup.add(instrs)
+      else:
+        kernel.loops[read.cache.level - 1].cache.add(instrs)
+
+proc cache_tensors*(program: Program) =
+  program.assert_pass("cache_tensors",
+    requires = {StageCacheSizes},
+    preserves = {
+      StageBounds, StageFolded, StageStaticShapes, StageGenerated,
+      StageTensors, StageShapes, StageSortedShapes, StageCacheSizes
+    }
+  )
+  
+  for name, target in program.targets:
+    for kernel in target.kernels:
+      kernel.cache_tensors()
 
 proc inline_loop(kernel: Kernel, compile_target: CompileTarget) =
   let loop = kernel.loops.pop()
+  kernel.expr.instrs.insert(loop.cache)
   if loop.mode >= LoopParallel:
     case compile_target:
       of CompileCpu:
@@ -1933,7 +2061,11 @@ proc lift_invariants(instrs: var seq[Instr],
       let level = levels.pop()
       instrs.insert(level, it)
       it += level.len
-    elif instr.kind notin SIDE_EFFECT_INSTRS:
+    
+    if instr.kind in SIDE_EFFECT_INSTRS:
+      if instr.res != RegId(0):
+        regs[instr.res] = levels.len 
+    else:
       var instr_level = 0
       if instr.kind notin {InstrShape, InstrLen, InstrShapeLen}:
         instr_level = min_level
@@ -1949,9 +2081,7 @@ proc lift_invariants(instrs: var seq[Instr],
         levels[instr_level].add(instr)
         instrs.delete(it)
         continue
-    else:
-      if instr.res != RegId(0):
-        regs[instr.res] = levels.len 
+    
     it += 1
 
 proc lift_invariants*(program: Program) =

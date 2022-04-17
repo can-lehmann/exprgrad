@@ -233,6 +233,7 @@ proc compile*(program: Program) =
   program.fuse_loops()
   program.tile_loops()
   program.infer_cache_sizes()
+  program.cache_tensors()
   program.inline_tensor_ops()
   program.inline_static_shapes()
   program.unfold_loop_bounds()
@@ -240,7 +241,6 @@ proc compile*(program: Program) =
   program.inline_loops()
   program.lift_invariants()
   program.collect_closures()
-  #echo $program.targets["c"]
   program.infer_types()
 
 proc compile*[T](graphs: varargs[Fun]): Model[T] =
