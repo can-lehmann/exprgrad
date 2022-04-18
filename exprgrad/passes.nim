@@ -1740,10 +1740,10 @@ proc infer_cache_sizes(kernel: Kernel, compile_target: CompileTarget) =
       for it in 0..<cache_level:
         template loop: var Loop = kernel.loops[it]
         if loop.mode >= LoopParallel:
-          if loop.group == RegId(0):
-            loop.group = kernel.regs.alloc()
+          if loop.tile_offset == RegId(0):
+            loop.tile_offset = kernel.regs.alloc()
           regs[loop.iter] = OffsetInterval(
-            offset: init_linear_index(loop.group),
+            offset: init_linear_index(loop.tile_offset),
             interval: Interval(min: 0, max: loop.schedule.tile_size - 1)
           )
     
@@ -1774,7 +1774,7 @@ proc infer_cache_sizes*(program: Program) =
     for kernel in target.kernels:
       kernel.infer_cache_sizes(target.compile_target)
 
-proc cache_tensor(read: TensorOp, regs: var seq[Register]): seq[Instr] =
+proc cache_tensor(read: TensorOp, kernel: Kernel, compile_target: CompileTarget): seq[Instr] =
   var cache_shape: seq[int] = @[]
   for dim in read.cache.dims:
     cache_shape.add(dim.interval.max - dim.interval.min + 1)
@@ -1783,7 +1783,29 @@ proc cache_tensor(read: TensorOp, regs: var seq[Register]): seq[Instr] =
     res: read.cache.reg
   ))
   
-  let iter = regs.alloc()
+  var
+    thread_count = 1
+    offset = LinearIndex()
+    stride = 1
+  if compile_target == CompileGpu:
+    for it in countdown(kernel.loops.len - 1, 0):
+      template loop: var Loop = kernel.loops[it]
+      if loop.mode >= LoopParallel:
+        thread_count *= loop.schedule.tile_size
+        if loop.local_offset == RegId(0):
+          loop.local_offset = kernel.regs.alloc()
+        offset.factors[loop.local_offset] = stride
+        stride *= loop.schedule.tile_size
+  
+  let start = offset.unfold(kernel.regs)
+  result.add(start.instrs)
+  
+  let iter =
+    if cache_shape.prod() <= thread_count:
+      start.res
+    else:
+      kernel.regs.alloc()
+  
   var body: seq[Instr] = @[]
   
   var
@@ -1793,13 +1815,13 @@ proc cache_tensor(read: TensorOp, regs: var seq[Register]): seq[Instr] =
     let
       dim = read.cache.dims[it]
       size = dim.interval.max - dim.interval.min + 1
-      size_reg = regs.alloc()
+      size_reg = kernel.regs.alloc()
     
     let local_offset =
       if it == 0:
         cur
       else:
-        let offset = regs.alloc()
+        let offset = kernel.regs.alloc()
         body.add(Instr(kind: InstrIndex,
           index_lit: size,
           res: size_reg
@@ -1808,7 +1830,7 @@ proc cache_tensor(read: TensorOp, regs: var seq[Register]): seq[Instr] =
           args: @[cur, size_reg],
           res: offset
         ))
-        let new_cur = regs.alloc()
+        let new_cur = kernel.regs.alloc()
         body.add(Instr(kind: InstrIndexDiv,
           args: @[cur, size_reg],
           res: new_cur
@@ -1816,13 +1838,13 @@ proc cache_tensor(read: TensorOp, regs: var seq[Register]): seq[Instr] =
         cur = new_cur
         offset
     
-    let read_dim = unfold(dim.offset + local_offset.init_linear_index(), regs)
+    let read_dim = unfold(dim.offset + local_offset.init_linear_index(), kernel.regs)
     body.add(read_dim.instrs)
     dims.add(init_linear_index(read_dim.res))
   
-  let index = expand_tensor_index(dims, read.tensor, regs)
+  let index = expand_tensor_index(dims, read.tensor, kernel.regs)
   body.add(index.instrs)
-  let value = regs.alloc()
+  let value = kernel.regs.alloc()
   body.add(Instr(kind: InstrRead,
     args: @[index.res],
     tensor: read.tensor,
@@ -1832,28 +1854,37 @@ proc cache_tensor(read: TensorOp, regs: var seq[Register]): seq[Instr] =
     args: @[read.cache.reg, iter, value]
   ))
   
-  let
-    start = regs.alloc()
-    stop = regs.alloc()
-  result.add(Instr(kind: InstrIndex,
-    index_lit: 0,
-    res: start
-  ))
-  result.add(Instr(kind: InstrIndex,
-    index_lit: cache_shape.prod(),
-    res: stop
-  ))
-  result.add(Instr(kind: InstrLoop,
-    args: @[start, stop],
-    loop_iter: iter,
-    loop_step: 1,
-    body: body
-  ))
+  
+  if cache_shape.prod() == thread_count:
+    result.add(body)
+  else:
+    let stop = kernel.regs.alloc()
+    result.add(Instr(kind: InstrIndex,
+      index_lit: cache_shape.prod(),
+      res: stop
+    ))
+    if cache_shape.prod() < thread_count:
+      let cond = kernel.regs.alloc()
+      result.add(Instr(kind: InstrLt,
+        args: @[iter, stop],
+        res: cond
+      ))
+      result.add(Instr(kind: InstrIf,
+        args: @[cond],
+        body: body
+      ))
+    else:
+      result.add(Instr(kind: InstrLoop,
+        args: @[start.res, stop],
+        loop_iter: iter,
+        loop_step: thread_count,
+        body: body
+      ))
 
-proc cache_tensors*(kernel: Kernel) =
+proc cache_tensors*(kernel: Kernel, compile_target: CompileTarget) =
   for read in kernel.reads:
     if read.cache.exists:
-      let instrs = cache_tensor(read, kernel.regs)
+      let instrs = cache_tensor(read, kernel, compile_target)
       if read.cache.level == 0:
         kernel.setup.add(instrs)
       else:
@@ -1870,11 +1901,16 @@ proc cache_tensors*(program: Program) =
   
   for name, target in program.targets:
     for kernel in target.kernels:
-      kernel.cache_tensors()
+      kernel.cache_tensors(target.compile_target)
 
 proc inline_loop(kernel: Kernel, compile_target: CompileTarget) =
   let loop = kernel.loops.pop()
-  kernel.expr.instrs.insert(loop.cache)
+  if loop.cache.len > 0:
+    if compile_target == CompileGpu:
+      kernel.expr.instrs.insert(Instr(kind: InstrBarrier))
+    kernel.expr.instrs.insert(loop.cache)
+    if compile_target == CompileGpu:
+      kernel.expr.instrs.insert(Instr(kind: InstrBarrier))
   if loop.mode >= LoopParallel:
     case compile_target:
       of CompileCpu:
@@ -1905,16 +1941,22 @@ proc inline_loop(kernel: Kernel, compile_target: CompileTarget) =
         
         var conds: seq[RegId] = @[]
         for it, loop in loops:
-          var group_index = loop.group
-          if group_index == RegId(0):
-            group_index = kernel.regs.alloc()
           let
+            local_offset =
+              if loop.local_offset != RegId(0):
+                loop.local_offset
+              else:
+                kernel.regs.alloc()
             index = GpuIndex(
-              group: group_index,
-              local: kernel.regs.alloc(),
+              group: kernel.regs.alloc(),
+              local: local_offset,
               size: loop.schedule.tile_size
             )
-            offset = kernel.regs.alloc()
+            offset =
+              if loop.tile_offset != RegId(0):
+                loop.tile_offset
+              else:
+                kernel.regs.alloc()
             size_reg = kernel.regs.alloc()
           instr.body.add(Instr(kind: InstrIndex,
             index_lit: index.size,
@@ -2040,6 +2082,8 @@ proc lift_invariants(instrs: var seq[Instr],
             regs[index.local] = levels.len
             regs[index.group] = levels.len
           body_min_level = levels.len
+        of InstrIf:
+          body_min_level = levels.len # TODO: Only for InstrRead, InstrArrayRead, ...
         else: discard
       instrs[it].body.lift_invariants(regs, levels, body_min_level)
       let level = levels.pop()

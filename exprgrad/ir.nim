@@ -130,7 +130,8 @@ type
   
   Loop* = object
     iter*: RegId
-    group*: RegId
+    local_offset*: RegId
+    tile_offset*: RegId
     mode*: LoopMode
     
     has_bounds*: bool
