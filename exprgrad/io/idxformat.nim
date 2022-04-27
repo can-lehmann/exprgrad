@@ -21,9 +21,9 @@ template type_id(typ: typedesc): uint8 =
     0x08
   elif typ is int8:
     0x09
-  elif typ of SomeInteger and sizeof(typ) == 2:
+  elif typ is SomeInteger and sizeof(typ) == 2:
     0x0b
-  elif typ of SomeInteger and sizeof(typ) == 4:
+  elif typ is SomeInteger and sizeof(typ) == 4:
     0x0c
   elif typ is float32:
     0x0d
@@ -63,3 +63,31 @@ proc load_idx*[T](path: string): Tensor[T] =
   var stream = open_read_stream(path)
   defer: stream.close()
   result = parse_idx[T](stream)
+
+proc write_uint[T: SomeUnsignedInt](stream: var WriteStream, value: T) =
+  for it in countdown(sizeof(T) - 1, 0):
+    stream.write(uint8((value shr (8 * it)) and 0xff))
+
+proc write_idx*[T](stream: var WriteStream, tensor: Tensor[T]) =
+  stream.write([uint8(0), uint8(0)])
+  stream.write(type_id(T))
+  stream.write(uint8(tensor.shape.len))
+  for dim in tensor.shape:
+    stream.write_uint(uint32(dim))
+  for it in 0..<tensor.len:
+    let value = tensor.data[it]
+    when sizeof(T) == 1:
+      stream.write(cast[uint8](value))
+    elif sizeof(T) == 2:
+      stream.write_uint(cast[uint16](value))
+    elif sizeof(T) == 4:
+      stream.write_uint(cast[uint32](value))
+    elif sizeof(T) == 8:
+      stream.write_uint(cast[uint64](value))
+    else:
+      {.error: "Invalid tensor type".}
+
+proc save_idx*[T](tensor: Tensor[T], path: string) =
+  var stream = open_write_stream(path)
+  defer: stream.close()
+  stream.write_idx(tensor)

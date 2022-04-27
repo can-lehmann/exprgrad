@@ -122,6 +122,10 @@ proc write*(stream: var WriteStream, str: string) =
   # TODO: Optimize
   for chr in str:
     stream.write(chr)
+
+proc write*(stream: var WriteStream, data: openArray[uint8]) =
+  for value in data:
+    stream.write(value)
 {.pop.}
 
 proc flush*(stream: var WriteStream) =
