@@ -2156,6 +2156,19 @@ proc collect_closures(instrs: var seq[Instr], regs: var seq[int], level: int): H
   for instr in instrs.mitems:
     var used = instr.body.collect_closures(regs, level + 1)
     
+    # TODO: Refactor using iterator which returns all registers defined by the instruction
+    case instr.kind:
+      of InstrLoop:
+        regs[instr.loop_iter] = level + 1
+      of InstrThreads:
+        regs[instr.threads_begin] = level + 1
+        regs[instr.threads_end] = level + 1
+      of InstrGpu:
+        for index in instr.gpu_indices:
+          regs[index.local] = level + 1
+          regs[index.group] = level + 1
+      else: discard
+    
     if instr.kind in {InstrThreads, InstrGpu}:
       var closure = ParallelClosure()
       for reg in used:
@@ -2194,3 +2207,65 @@ proc collect_closures*(program: Program) =
     for kernel in target.kernels:
       var regs = new_seq[int](kernel.regs.len)
       discard kernel.setup.collect_closures(regs, 0)
+
+proc extract_closure(regs: seq[bool], closure: ParallelClosure): seq[bool] =
+  result = new_seq[bool](regs.len)
+  for reg in closure.regs:
+    if not regs[reg]:
+      raise ValidationError(msg: $reg & " cannot be captured because it is not defined")
+    result[reg] = regs[reg]
+
+proc validate(instrs: seq[Instr], regs: var seq[bool]) =
+  for instr in instrs:
+    for arg in instr.args:
+      if not regs[arg]:
+        raise ValidationError(msg: $arg & " is not defined")
+    
+    case instr.kind:
+      of InstrIf:
+        instr.body.validate(regs)
+      of InstrLoop:
+        regs[instr.loop_iter] = true
+        instr.body.validate(regs)
+      of InstrThreads:
+        var closure = regs.extract_closure(instr.threads_closure)
+        closure[instr.threads_begin] = true
+        closure[instr.threads_end] = true
+        instr.body.validate(closure)
+      of InstrGpu:
+        var closure = regs.extract_closure(instr.gpu_closure)
+        for index in instr.gpu_indices:
+          closure[index.local] = true
+          closure[index.group] = true
+        instr.body.validate(closure)
+      else: discard
+    
+    if instr.res != RegId(0):
+      regs[instr.res] = true
+
+proc validate(index: LinearIndex, regs: var seq[bool]) =
+  index.setup.validate(regs)
+  for reg, factor in index.factors:
+    if not regs[reg]:
+      raise ValidationError(msg: $reg & " is not defined")
+
+proc validate(kernel: Kernel) =
+  if kernel.generator.kind != GenNone:
+    return
+  var regs = new_seq[bool](kernel.regs.len)
+  kernel.setup.validate(regs)
+  for loop in kernel.loops:
+    loop.start.validate(regs)
+    loop.stop.validate(regs)
+    regs[loop.iter] = true
+  # TODO: Conditions, Write, Read Index
+  for read in kernel.reads:
+    regs[read.data] = true
+  kernel.expr.instrs.validate(regs)
+
+proc validate*(program: Program) =
+  program.assert_pass("validate", preserves = ALL_STAGES)
+  
+  for name, target in program.targets:
+    for kernel in target.kernels:
+      kernel.validate()

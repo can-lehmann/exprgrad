@@ -58,6 +58,9 @@ proc find_inline_regs(instrs: seq[Instr],
   for instr in instrs:
     case instr.kind:
       of InstrLoop: inline[instr.loop_iter] = false
+      of InstrThreads:
+        inline[instr.threads_begin] = false
+        inline[instr.threads_end] = false
       of InstrGpu:
         for index in instr.gpu_indices:
           inline[index.local] = false
@@ -97,6 +100,10 @@ proc stringify(instr: Instr, regs: var seq[string], level: int): string =
       if instr.loop_step != 1:
         result &= " step " & $instr.loop_step
       result &= ":\n" & instr.body.stringify(regs, level + 1)
+    of InstrThreads:
+      result &= "threads (" & $instr.threads_begin & ", " & $instr.threads_end & ") in "
+      result &= regs[instr.args[0]] & " to " & regs[instr.args[1]] & ":\n"
+      result &= instr.body.stringify(regs, level + 1)
     of InstrGpu:
       result &= "gpu"
       for it, index in instr.gpu_indices:

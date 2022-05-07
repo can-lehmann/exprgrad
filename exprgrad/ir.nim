@@ -25,6 +25,7 @@ type
   JitError* = ref object of CompilerError
   StageError* = ref object of CompilerError
   ShapeError* = ref object of CompilerError
+  ValidationError* = ref object of CompilerError
 
 const
   TARGET_SUPPORTS_THREADS* = compile_option("threads")

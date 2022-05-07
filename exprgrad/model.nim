@@ -194,6 +194,7 @@ proc compile*(program: Program) =
   program.lift_invariants()
   program.collect_closures()
   program.infer_types()
+  program.validate()
 
 proc compile*[T](graphs: varargs[Fun]): Model[T] =
   let program = graphs.to_program()
