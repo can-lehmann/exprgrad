@@ -17,18 +17,18 @@
 import exprgrad, exprgrad/io/idxformat
 import ../tools/test_framework
 
-proc check_save_load[T](slice: HSlice[T, T] = T(0)..T(1),
+proc check_save_load[T](slice: HSlice[T, T] = low(T)..high(T),
                         path: string = "data.bin") =
   let tensor = new_rand_tensor([2, 3, 4], slice)
   tensor.save_idx(path)
   check load_idx[T](path) == tensor
 
 test "int":
-  check_save_load[uint8](uint8(0)..uint8(1))
+  check_save_load[uint8]()
   check_save_load[int8]()
   check_save_load[int16]()
   check_save_load[int32]()
 
 test "float":
-  check_save_load[float32]()
-  check_save_load[float64]()
+  check_save_load(float32(-10)..float32(10))
+  check_save_load(float64(-10)..float64(10))
