@@ -58,76 +58,14 @@ proc builtin_epoch[T](model: ModelPtr[T]): int =
   result = model.epoch
 {.pop.}
 
-type TaskProc = proc(model: pointer, a, b: int, data: pointer) {.cdecl, gcsafe.}
-
 when TARGET_SUPPORTS_THREADS:
-  import osproc
-  
-  type
-    Task = object
-      fn: TaskProc
-      model: pointer
-      data: pointer
-      a: int
-      b: int
-  
-    ThreadData = object
-      tasks: ptr Channel[Task]
-      done: ptr Channel[bool]
-    
-    ThreadPool = object
-      threads: seq[Thread[ThreadData]]
-      data: seq[ThreadData]
-      open: seq[int]
-  
-  proc thread_handler(data: ThreadData) {.gcsafe.} =
-    while true:
-      let task = data.tasks[].recv()
-      try:
-        task.fn(task.model, task.a, task.b, task.data)
-      except CatchableError as err:
-        data.done[].send(false)
-        continue
-      data.done[].send(true)
-  
-  proc alloc_channel[T](): ptr Channel[T] =
-    result = cast[ptr Channel[T]](alloc_shared0(sizeof(Channel[T])))
-    result[].open()
-  
-  proc init_thread_pool(): ThreadPool =
-    result.threads = new_seq[Thread[ThreadData]](count_processors())
-    result.open = new_seq[int](result.threads.len)
-    for it, thread in result.threads.mpairs:
-      let data = ThreadData(
-        tasks: alloc_channel[Task](),
-        done: alloc_channel[bool]()
-      )
-      result.data.add(data)
-      create_thread(thread, thread_handler, data)
-      thread.pin_to_cpu(it)
-  
-  proc len(pool: ThreadPool): int = pool.threads.len
-  
-  proc enqueue(pool: var ThreadPool, thread: int, task: Task) =
-    pool.data[thread].tasks[].send(task)
-    pool.open[thread] += 1
-  
-  proc join(pool: var ThreadPool, thread: int) =
-    while pool.open[thread] > 0:
-      discard pool.data[thread].done[].recv()
-      pool.open[thread] -= 1
-  
-  proc join(pool: var ThreadPool) =
-    for it in 0..<pool.len:
-      pool.join(it)
-  
-  var thread_pool = init_thread_pool()
+  import runtimes/threadpools
   
   {.push cdecl.}
   proc builtin_run_threads[T](model: ModelPtr[T],
-                              start, stop: int,
-                              data: pointer,
-                              fn: TaskProc) =
+                            start, stop: int,
+                            data: pointer,
+                            fn: TaskProc) =
     let size = stop - start
     var offset = start
     for thread in 0..<thread_pool.len:
@@ -145,12 +83,28 @@ when TARGET_SUPPORTS_THREADS:
     thread_pool.join()
   {.pop.}
 else:
+  type TaskProc = proc(model: pointer, a, b: int, data: pointer) {.cdecl, gcsafe.}
+  
   {.push cdecl.}
   proc builtin_run_threads[T](model: ModelPtr[T],
                               start, stop: int,
                               data: pointer,
                               fn: TaskProc) = discard
   proc builtin_join_threads[T](model: ModelPtr[T]) = discard
+  {.pop.}
+
+when TARGET_SUPPORTS_GPU and false:
+  discard
+else:
+  {.push cdecl.}
+  proc builtin_run_gpu_kernel[T](model: ModelPtr[T],
+                                 kernel_id: int,
+                                 groups_dims: int,
+                                 groups_shape: int) = discard
+  proc builtin_set_gpu_kernel_arg[T](model: ModelPtr[T],
+                                     kernel_id: int,
+                                     size: int,
+                                     data: pointer) = discard
   {.pop.}
 
 proc new_model*[T](program: Program,
@@ -165,7 +119,9 @@ proc new_model*[T](program: Program,
     debug_scalar: builtin_debug_scalar[T],
     epoch: builtin_epoch[T],
     run_threads: builtin_run_threads[T],
-    join_threads: builtin_join_threads[T]
+    join_threads: builtin_join_threads[T],
+    run_gpu_kernel: builtin_run_gpu_kernel[T],
+    set_gpu_kernel_arg: builtin_set_gpu_kernel_arg[T]
   )
   result = Model[T](
     program: program,

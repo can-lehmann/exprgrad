@@ -26,7 +26,9 @@ type
   StageError* = ref object of CompilerError
   ShapeError* = ref object of CompilerError
 
-const TARGET_SUPPORTS_THREADS* = compile_option("threads")
+const
+  TARGET_SUPPORTS_THREADS* = compile_option("threads")
+  TARGET_SUPPORTS_GPU* = defined(opencl)
 
 type
   KernelId* = distinct int

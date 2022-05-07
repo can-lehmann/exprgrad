@@ -16,6 +16,7 @@
 
 import std/[tables, sets]
 import wrappers/llvm
+import runtimes/gpu
 import ir, clgen
 
 proc to_llvm(scalar_type: ScalarType): TypeRef =
@@ -38,6 +39,9 @@ type Builtin = object
   # Threads
   run_threads: ValueRef
   join_threads: ValueRef
+  # Gpu
+  run_gpu_kernel: ValueRef
+  set_gpu_kernel_arg: ValueRef
   # Intrinsics
   sin: ValueRef
   cos: ValueRef
@@ -88,6 +92,18 @@ proc run_threads_signature(builtin: Builtin): TypeRef =
 proc join_threads_signature(builtin: Builtin): TypeRef =
   function_type(void_type(), [model_ptr_type()])
 
+proc set_gpu_kernel_arg_signature(builtin: Builtin): TypeRef =
+  function_type(void_type(), [
+    model_ptr_type(), nim_int_type(),
+    nim_int_type(), void_ptr_type()
+  ])
+
+proc run_gpu_kernel_signature(builtin: Builtin): TypeRef =
+  function_type(void_type(), [
+    model_ptr_type(), nim_int_type(),
+    nim_int_type(), nim_int_type().pointer_type(0)
+  ])
+
 proc scalar_unary_intrinsic_signature(builtin: Builtin): TypeRef =
   function_type(builtin.scalar_type.to_llvm(), [builtin.scalar_type.to_llvm()])
 
@@ -107,6 +123,8 @@ proc init_builtin(module: ModuleRef, program: Program): Builtin =
   result.epoch = module.add_function("epoch", result.epoch_signature())
   result.run_threads = module.add_function("run_threads", result.run_threads_signature())
   result.join_threads = module.add_function("join_threads", result.join_threads_signature())
+  result.run_gpu_kernel = module.add_function("run_gpu_kernel", result.run_gpu_kernel_signature())
+  result.set_gpu_kernel_arg = module.add_function("set_gpu_kernel_arg", result.set_gpu_kernel_arg_signature())
   
   let type_postfix = [Scalar32: "f32", Scalar64: "f64"][result.scalar_type]
   result.sin = module.add_function(cstring("llvm.sin." & type_postfix), result.scalar_unary_intrinsic_signature())
@@ -127,6 +145,8 @@ type Context = ref object
   builtin: Builtin
   tensors: seq[ValueRef]
   regs: seq[ValueRef]
+  when TARGET_SUPPORTS_GPU:
+    gpu_kernels: seq[GpuKernel]
 
 proc `[]`(ctx: Context, reg: RegId): ValueRef = ctx.regs[reg]
 proc `[]=`(ctx: Context, reg: RegId, val: ValueRef) = ctx.regs[reg] = val
@@ -489,6 +509,8 @@ type
     epoch*: pointer
     run_threads*: pointer
     join_threads*: pointer
+    run_gpu_kernel*: pointer
+    set_gpu_kernel_arg*: pointer
   
   Jit* = ref object
     module: ModuleRef
