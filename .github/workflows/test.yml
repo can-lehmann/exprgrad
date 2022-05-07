@@ -30,3 +30,4 @@ jobs:
       - run: sudo apt install -y llvm-13-dev
       - run: nimble install -Y
       - run: nimble test -Y
+      - run: nimble test -Y --threads:on
