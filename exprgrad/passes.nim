@@ -1775,6 +1775,12 @@ proc infer_cache_sizes*(program: Program) =
       kernel.infer_cache_sizes(target.compile_target)
 
 proc cache_tensor(read: TensorOp, kernel: Kernel, compile_target: CompileTarget): seq[Instr] =
+  type CacheSize = enum
+    CacheEqualShape,
+    CacheSmaller,
+    CacheEqualSize,
+    CacheLarger
+  
   var cache_shape: seq[int] = @[]
   for dim in read.cache.dims:
     cache_shape.add(dim.interval.max - dim.interval.min + 1)
@@ -1784,24 +1790,39 @@ proc cache_tensor(read: TensorOp, kernel: Kernel, compile_target: CompileTarget)
   ))
   
   var
-    thread_count = 1
+    thread_shape: seq[int] = @[]
+    local_offset_iters: seq[RegId] = @[]
     offset = LinearIndex()
     stride = 1
   if compile_target == CompileGpu:
     for it in countdown(kernel.loops.len - 1, 0):
       template loop: var Loop = kernel.loops[it]
       if loop.mode >= LoopParallel:
-        thread_count *= loop.schedule.tile_size
+        thread_shape.add(loop.schedule.tile_size)
         if loop.local_offset == RegId(0):
           loop.local_offset = kernel.regs.alloc()
+        local_offset_iters.add(loop.local_offset)
         offset.factors[loop.local_offset] = stride
         stride *= loop.schedule.tile_size
+  
+  thread_shape.reverse()
+  local_offset_iters.reverse()
+  
+  let cache_size =
+    if thread_shape == cache_shape:
+      CacheEqualShape
+    elif cache_shape.prod() < thread_shape.prod():
+      CacheSmaller
+    elif cache_shape.prod() == thread_shape.prod():
+      CacheEqualSize
+    else:
+      CacheLarger
   
   let start = offset.unfold(kernel.regs)
   result.add(start.instrs)
   
   let iter =
-    if cache_shape.prod() <= thread_count:
+    if cache_size in {CacheEqualShape, CacheSmaller, CacheEqualSize}:
       start.res
     else:
       kernel.regs.alloc()
@@ -1818,7 +1839,9 @@ proc cache_tensor(read: TensorOp, kernel: Kernel, compile_target: CompileTarget)
       size_reg = kernel.regs.alloc()
     
     let local_offset =
-      if it == 0:
+      if cache_size == CacheEqualShape:
+        local_offset_iters[it]
+      elif it == 0:
         cur
       else:
         let offset = kernel.regs.alloc()
@@ -1854,8 +1877,7 @@ proc cache_tensor(read: TensorOp, kernel: Kernel, compile_target: CompileTarget)
     args: @[read.cache.reg, iter, value]
   ))
   
-  
-  if cache_shape.prod() == thread_count:
+  if cache_size in {CacheEqualShape, CacheEqualSize}:
     result.add(body)
   else:
     let stop = kernel.regs.alloc()
@@ -1863,7 +1885,7 @@ proc cache_tensor(read: TensorOp, kernel: Kernel, compile_target: CompileTarget)
       index_lit: cache_shape.prod(),
       res: stop
     ))
-    if cache_shape.prod() < thread_count:
+    if cache_size == CacheSmaller:
       let cond = kernel.regs.alloc()
       result.add(Instr(kind: InstrLt,
         args: @[iter, stop],
@@ -1877,7 +1899,7 @@ proc cache_tensor(read: TensorOp, kernel: Kernel, compile_target: CompileTarget)
       result.add(Instr(kind: InstrLoop,
         args: @[start.res, stop],
         loop_iter: iter,
-        loop_step: thread_count,
+        loop_step: thread_shape.prod(),
         body: body
       ))
 
