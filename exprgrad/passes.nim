@@ -2117,7 +2117,7 @@ proc lift_invariants(instrs: var seq[Instr],
         regs[instr.res] = levels.len 
     else:
       var instr_level = 0
-      if instr.kind notin {InstrShape, InstrLen, InstrShapeLen}:
+      if instr.kind notin {InstrShape, InstrLen, InstrShapeLen, InstrEpoch}:
         instr_level = min_level
       
       for arg in instr.args:

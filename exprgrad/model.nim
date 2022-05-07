@@ -15,7 +15,7 @@
 # Simple API used to compile and run models in exprgrad
 
 import std/[tables, sets]
-import ir, parser, passes, tensors, llvmgen, irprint, cgen
+import ir, parser, passes, tensors, llvmgen, irprint
 
 type
   ModelObj[T] = object
@@ -200,10 +200,6 @@ template to_scalar_type(T: typedesc): ScalarType =
   else:
     raise new_exception(ValueError, $T & " is not a valid scalar type")
     Scalar32
-
-proc emit_source*[T](model: Model[T]): string =
-  bind cgen.to_c
-  result = cgen.to_c(model.program)
 
 proc emit_ir*[T](model: Model[T]): string =
   bind irprint.`$`

@@ -18,7 +18,7 @@ import std/[tables, sequtils]
 import exprgrad/[ir, irprint, model, parser, dsl]
 import ../tools/test_framework
 
-test "matmul":
+test "matmul/passes":
   let
     a = input("a", [1024, -1])
     b = input("b")
@@ -36,6 +36,24 @@ test "matmul":
   let program = to_program([c.target("c", CompileGpu)])
   program.compile()
   echo program.targets["c"]
+
+test "matmul/compile":
+  let
+    a = input("a", [1024, -1])
+    b = input("b")
+  c*[y, x] ++= a[y, it] * b[it, x] | (x, y, it) do:
+    schedule:
+      parallel(y)
+      gpu:
+        tile_size(x, 32)
+        tile_size(y, 16)
+        parallel(x)
+        cache(a)
+        cache(b)
+        tile_size(it, 16)
+        tile(it)
+  let program = compile[float32](c.target("c", CompileGpu))
+  
 
 test "static_shapes":
   for (size, expect_bounds_cond) in [(1024, false), (512, false), (123, true), (8, true)]:

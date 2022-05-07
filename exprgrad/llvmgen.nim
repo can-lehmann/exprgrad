@@ -16,7 +16,7 @@
 
 import std/[tables, sets]
 import wrappers/llvm
-import ir
+import ir, clgen
 
 proc to_llvm(scalar_type: ScalarType): TypeRef =
   case scalar_type:
@@ -417,6 +417,8 @@ proc to_llvm(instrs: seq[Instr], ctx: Context) =
         res = builder.build_load2(item_type, value_ptr, cstring($instr.res))
       of InstrArrayLen:
         res = const_nim_int(ctx.kernel.regs[instr.args[0]].typ.len)
+      of InstrGpu:
+        echo instr.body.to_cl(instr.gpu_closure, ctx.kernel, ctx.program)
       else:
         raise GeneratorError(msg: "Unable to generate LLVM IR for " & $instr.kind)
     

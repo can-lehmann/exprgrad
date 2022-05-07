@@ -353,11 +353,11 @@ If the sample count is not divisible by the `batch_size`, the remaining samples 
 This will likely be fixed in the future.
 
 ```nim
-proc emit_source*[T](model: Model[T]): string
+proc emit_ir*[T](model: Model[T]): string
 ```
 
-Emits C source code for all targets of `model`.
-This is currently only used for debugging purposes, but will be the base for the GPU backend in the future.
+Emits intermediate representation for all targets of `model`.
+This is mainly used for debugging purposes.
 
 ### IO
 
