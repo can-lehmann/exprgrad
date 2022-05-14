@@ -101,7 +101,9 @@ proc set_gpu_kernel_arg_signature(builtin: Builtin): TypeRef =
 proc run_gpu_kernel_signature(builtin: Builtin): TypeRef =
   function_type(void_type(), [
     model_ptr_type(), nim_int_type(),
-    nim_int_type(), nim_int_type().pointer_type(0)
+    nim_int_type(),
+    nim_int_type().pointer_type(0),
+    nim_int_type().pointer_type(0)
   ])
 
 proc scalar_unary_intrinsic_signature(builtin: Builtin): TypeRef =
@@ -145,8 +147,7 @@ type Context = ref object
   builtin: Builtin
   tensors: seq[ValueRef]
   regs: seq[ValueRef]
-  when TARGET_SUPPORTS_GPU:
-    gpu_kernels: seq[GpuKernel]
+  gpu_sources: seq[GpuKernelSource]
 
 proc `[]`(ctx: Context, reg: RegId): ValueRef = ctx.regs[reg]
 proc `[]=`(ctx: Context, reg: RegId, val: ValueRef) = ctx.regs[reg] = val
@@ -438,7 +439,9 @@ proc to_llvm(instrs: seq[Instr], ctx: Context) =
       of InstrArrayLen:
         res = const_nim_int(ctx.kernel.regs[instr.args[0]].typ.len)
       of InstrGpu:
-        echo instr.body.to_cl(instr.gpu_closure, ctx.kernel, ctx.program)
+        when defined(opencl):
+          let source = instr.body.to_cl(instr.gpu_closure, instr.gpu_indices, ctx.kernel, ctx.program)
+          ctx.gpu_sources.add(GpuKernelSource(name: "cl_kernel", source: source))
       else:
         raise GeneratorError(msg: "Unable to generate LLVM IR for " & $instr.kind)
     
@@ -456,19 +459,21 @@ proc to_llvm(kernel: Kernel, kernel_id: KernelId, ctx: Context) =
   ctx.regs = new_seq[ValueRef](kernel.regs.len)
   kernel.setup.to_llvm(ctx)
 
-proc to_llvm*(program: Program): ModuleRef =
+proc to_llvm*(program: Program): (ModuleRef, seq[GpuKernelSource]) =
   program.assert_gen("llvm", requires={
     StageTyped, StageGenerated, StageTensors, StageShapes,
     StageLoops, StageTensorInstrs, StageSortedShapes,
     StageConditions
   })
 
-  result = module_create_with_name("module")
-  let builtin = init_builtin(result, program)
+  let
+    module = module_create_with_name("module")
+    builtin = init_builtin(module, program)
+  var gpu_sources: seq[GpuKernelSource] = @[]
   for name, target in program.targets:
     let
       sig = function_type(void_type(), [model_ptr_type()])
-      fn = result.add_function(cstring("target_" & name), sig)
+      fn = module.add_function(cstring("target_" & name), sig)
       entry = fn.append_basic_block("entry")
       builder = create_builder()
     
@@ -477,7 +482,7 @@ proc to_llvm*(program: Program): ModuleRef =
     builder.position_builder_at_end(entry)
     var ctx = Context(
       program: program,
-      module: result,
+      module: module,
       builder: builder,
       fn: fn,
       builtin: builtin,
@@ -497,6 +502,8 @@ proc to_llvm*(program: Program): ModuleRef =
       kernel.to_llvm(KernelId(it + 1), ctx)
     discard builder.build_ret()
     dispose_builder(builder)
+    gpu_sources.add(ctx.gpu_sources)
+  result = (module, gpu_sources)
 
 type
   JitBuiltin* = object
@@ -516,6 +523,7 @@ type
     module: ModuleRef
     engine: ExecutionEngineRef
     builtin: JitBuiltin
+    gpu_context: GpuContext
 
 proc finalize*(jit: Jit) =
   if not jit.engine.is_nil:

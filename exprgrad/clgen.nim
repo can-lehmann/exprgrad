@@ -186,6 +186,17 @@ proc to_cl(instrs: seq[Instr], ctx: Context): string =
       result &= "\n"
     result &= make_indent(ctx.indent) & stmt & ";"
 
+proc to_cl(indices: seq[GpuIndex], ctx: Context): string =
+  for it, index in indices:
+    template get_index(reg: RegId, name: string) =
+      if ctx.regs[reg].len > 0:
+        if result.len > 0:
+          result &= "\n"
+        result &= make_indent(ctx.indent) & nim_int_to_cl() & " " & ctx.regs[reg] & " = " & name & "(" & $it & ");"
+    
+    get_index(index.local, "get_local_id")
+    get_index(index.group, "get_group_id")
+
 proc inline_registers(instrs: seq[Instr], usages: var seq[int]) =
   for instr in instrs:
     for arg in instr.args:
@@ -202,6 +213,7 @@ proc inline_registers(instrs: seq[Instr], usages: var seq[int]) =
 
 proc to_cl*(instrs: seq[Instr],
             closure: ParallelClosure,
+            indices: seq[GpuIndex],
             kernel: Kernel,
             program: Program): string =
   let ctx = Context(kernel: kernel, program: program)
@@ -214,13 +226,22 @@ proc to_cl*(instrs: seq[Instr],
     for reg in closure.regs:
       usages[reg] = 2
     
+    for index in indices:
+      if usages[index.local] > 0:
+        usages[index.local] = 2
+      if usages[index.group] > 0:
+        usages[index.group] = 2
+    
     for it, usage_count in usages:
       if usage_count > 1:
         ctx.regs[it] = $RegId(it + 1)
         if kernel.regs[it].name.len > 0:
           ctx.regs[it] &= "_" & kernel.regs[it].name
     
-    result = instrs.to_cl(ctx)
+    result = indices.to_cl(ctx)
+    if result.len > 0:
+      result &= "\n"
+    result &= instrs.to_cl(ctx)
   
   var args: seq[string] = @[]
   for tensor in closure.tensors:
@@ -229,6 +250,6 @@ proc to_cl*(instrs: seq[Instr],
   for reg in closure.regs:
     args.add(kernel.regs[reg].typ.to_cl(ctx) & " " & $reg)
   
-  result = make_indent(ctx.indent) & "__kernel cl_kernel(" & args.join(", ") & ") {\n" & result
+  result = make_indent(ctx.indent) & "__kernel void cl_kernel(" & args.join(", ") & ") {\n" & result
   result &= "\n" & make_indent(ctx.indent) & "}"
 

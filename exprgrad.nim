@@ -16,6 +16,7 @@
 
 import std/[macros]
 import exprgrad/[tensors, parser, model, ir, dsl]
+import exprgrad/runtimes/gpu
 export tensors
 export dsl
 export Fun, `++=`, with_shape, copy_shape, lock, make_opt
@@ -23,3 +24,4 @@ export param, input, cache, rand, params, grad
 export backwards, optimize, backprop, reshape, target, CompileTarget, cond
 export Model, compile, call, apply, fit, emit_ir, save_llvm
 export ir.`==`, ir.hash, parser.hash
+export new_gpu_context, list_devices

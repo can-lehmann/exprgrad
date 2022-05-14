@@ -30,6 +30,10 @@ type
     size: int
     mem: PMem
   
+  GpuKernelSource* = object
+    name*: string
+    source*: string
+  
   GpuKernel* = ref object
     ctx: GpuContext
     kernel: PKernel
@@ -121,7 +125,7 @@ proc read*[T](buffer: GpuBuffer): seq[T] =
       buffer.mem, CL_TRUE, 0, buffer.size, result[0].addr, 0, nil, nil
     )
 
-proc compile*(ctx: GpuContext, name, source: string): GpuKernel =
+proc compile*(ctx: GpuContext, name: string, source: string): GpuKernel =
   result = GpuKernel(ctx: ctx)
   
   let strings = alloc_cstring_array([source])
@@ -149,6 +153,9 @@ proc compile*(ctx: GpuContext, name, source: string): GpuKernel =
   
   result.kernel = create_kernel(program, name.cstring, status.addr)
   check status
+
+proc compile*(ctx: GpuContext, source: GpuKernelSource): GpuKernel =
+  result = ctx.compile(source.name, source.source)
 
 proc run*(kernel: GpuKernel, buffers: openArray[(int, GpuBuffer)], global_size, local_size: openArray[int]) =
   for (id, buffer) in buffers:

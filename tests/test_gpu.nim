@@ -15,7 +15,7 @@
 # Unit-tests for compiling exprgrad kernels to the GPU
 
 import std/[tables, sequtils]
-import exprgrad/[ir, irprint, model, parser, dsl]
+import exprgrad, exprgrad/[ir, irprint, model, parser]
 import ../tools/test_framework
 
 test "matmul/passes":
@@ -52,8 +52,8 @@ test "matmul/compile":
         cache(b)
         tile_size(it, 16)
         tile(it)
-  let program = compile[float32](c.target("c", CompileGpu))
-  
+  when TARGET_SUPPORTS_GPU:
+    let program = compile[float32](c.target("c", CompileGpu), gpu=new_gpu_context())
 
 test "static_shapes":
   for (size, expect_bounds_cond) in [(1024, false), (512, false), (123, true), (8, true)]:

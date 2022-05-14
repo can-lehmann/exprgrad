@@ -15,12 +15,20 @@
 # Simple API used to compile and run models in exprgrad
 
 import std/[tables, sets]
-import ir, parser, passes, tensors, llvmgen, irprint
+import ir, parser, passes, tensors, llvmgen, irprint, runtimes/gpu
 
 type
+  GpuModel[T] = ref object
+    ctx: GpuContext
+    kernels: seq[GpuKernel]
+    params: Table[TensorId, GpuTensor[T]]
+    caches: Table[TensorId, GpuTensor[T]]
+    tensors: seq[GpuTensor[T]]
+  
   ModelObj[T] = object
     program*: Program
     jit: Jit
+    gpu: GpuModel[T]
     params*: Table[TensorId, Tensor[T]]
     caches*: Table[TensorId, Tensor[T]]
     tensors: seq[Tensor[T]]
@@ -93,24 +101,33 @@ else:
   proc builtin_join_threads[T](model: ModelPtr[T]) = discard
   {.pop.}
 
-when TARGET_SUPPORTS_GPU and false:
-  discard
+when TARGET_SUPPORTS_GPU:
+  {.push cdecl.}
+  proc builtin_run_gpu_kernel[T](model: ModelPtr[T],
+                                 kernel_id: int,
+                                 work_dims: int,
+                                 group_size: ptr int,
+                                 local_size: ptr int) = discard
+  proc builtin_set_gpu_kernel_arg[T](model: ModelPtr[T],
+                                     kernel_id: int,
+                                     size: int,
+                                     data: pointer) = discard
+  {.pop.}
 else:
   {.push cdecl.}
   proc builtin_run_gpu_kernel[T](model: ModelPtr[T],
                                  kernel_id: int,
-                                 groups_dims: int,
-                                 groups_shape: int) = discard
+                                 work_dims: int,
+                                 group_size: ptr int,
+                                 local_size: ptr int) = discard
   proc builtin_set_gpu_kernel_arg[T](model: ModelPtr[T],
                                      kernel_id: int,
                                      size: int,
                                      data: pointer) = discard
   {.pop.}
 
-proc new_model*[T](program: Program,
-                   params: Table[TensorId, Tensor[T]],
-                   caches: Table[TensorId, Tensor[T]]): Model[T] =
-  let builtin = JitBuiltin(
+proc init_builtin[T](): JitBuiltin =
+  result = JitBuiltin(
     tensor: builtin_tensor[T],
     shape: builtin_shape[T],
     len: builtin_len[T],
@@ -123,15 +140,27 @@ proc new_model*[T](program: Program,
     run_gpu_kernel: builtin_run_gpu_kernel[T],
     set_gpu_kernel_arg: builtin_set_gpu_kernel_arg[T]
   )
-  result = Model[T](
-    program: program,
-    params: params,
-    caches: caches,
-    jit: new_jit(program.to_llvm(), builtin),
-    tensors: new_seq[Tensor[T]](program.tensors.len)
-  )
 
-proc new_model*[T](program: Program): Model[T] =
+proc new_gpu_model[T](ctx: GpuContext, sources: seq[GpuKernelSource]): GpuModel[T] =
+  result = GpuModel[T](ctx: ctx)
+  for source in sources:
+    result.kernels.add(ctx.compile(source))
+
+proc new_model*[T](program: Program,
+                   params: Table[TensorId, Tensor[T]],
+                   caches: Table[TensorId, Tensor[T]],
+                   gpu_ctx: GpuContext): Model[T] =
+  result = Model[T](program: program, params: params, caches: caches)
+  result.tensors = new_seq[Tensor[T]](program.tensors.len)
+  
+  let
+    builtin = init_builtin[T]()
+    (module, gpu_sources) = program.to_llvm()
+  result.jit = new_jit(module, builtin)
+  if not gpu_ctx.is_nil:
+    result.gpu = new_gpu_model[T](gpu_ctx, gpu_sources)
+
+proc new_model*[T](program: Program, gpu_ctx: GpuContext): Model[T] =
   bind `==`
   var
     params = init_table[TensorId, Tensor[T]]()
@@ -146,7 +175,7 @@ proc new_model*[T](program: Program): Model[T] =
       of TensorCache:
         caches[tensor_id] = new_tensor[T](tensor_def.shape)
       else: discard
-  result = new_model(program, params, caches)
+  result = new_model(program, params, caches, gpu_ctx)
 
 template to_scalar_type(T: typedesc): ScalarType =
   when T is float32:
@@ -196,11 +225,11 @@ proc compile*(program: Program) =
   program.infer_types()
   program.validate()
 
-proc compile*[T](graphs: varargs[Fun]): Model[T] =
+proc compile*[T](graphs: varargs[Fun], gpu: GpuContext = nil): Model[T] =
   let program = graphs.to_program()
   program.scalar_type = to_scalar_type(T)
   program.compile()
-  result = new_model[T](program)
+  result = new_model[T](program, gpu)
 
 proc alloc_shapes[T](model: Model[T], target: string, shapes: Table[ir.TensorId, seq[int]]) =
   for tensor_id, shape in shapes.pairs:
