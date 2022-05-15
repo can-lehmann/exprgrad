@@ -41,7 +41,8 @@ type Builtin = object
   join_threads: ValueRef
   # Gpu
   run_gpu_kernel: ValueRef
-  set_gpu_kernel_arg: ValueRef
+  set_gpu_kernel_index: ValueRef
+  set_gpu_kernel_tensor: ValueRef
   # Intrinsics
   sin: ValueRef
   cos: ValueRef
@@ -92,10 +93,16 @@ proc run_threads_signature(builtin: Builtin): TypeRef =
 proc join_threads_signature(builtin: Builtin): TypeRef =
   function_type(void_type(), [model_ptr_type()])
 
-proc set_gpu_kernel_arg_signature(builtin: Builtin): TypeRef =
+proc set_gpu_kernel_index_signature(builtin: Builtin): TypeRef =
   function_type(void_type(), [
     model_ptr_type(), nim_int_type(),
-    nim_int_type(), void_ptr_type()
+    nim_int_type(), nim_int_type()
+  ])
+
+proc set_gpu_kernel_tensor_signature(builtin: Builtin): TypeRef =
+  function_type(void_type(), [
+    model_ptr_type(), nim_int_type(),
+    nim_int_type(), nim_int_type()
   ])
 
 proc run_gpu_kernel_signature(builtin: Builtin): TypeRef =
@@ -126,7 +133,8 @@ proc init_builtin(module: ModuleRef, program: Program): Builtin =
   result.run_threads = module.add_function("run_threads", result.run_threads_signature())
   result.join_threads = module.add_function("join_threads", result.join_threads_signature())
   result.run_gpu_kernel = module.add_function("run_gpu_kernel", result.run_gpu_kernel_signature())
-  result.set_gpu_kernel_arg = module.add_function("set_gpu_kernel_arg", result.set_gpu_kernel_arg_signature())
+  result.set_gpu_kernel_index = module.add_function("set_gpu_kernel_index", result.set_gpu_kernel_index_signature())
+  result.set_gpu_kernel_tensor = module.add_function("set_gpu_kernel_tensor", result.set_gpu_kernel_tensor_signature())
   
   let type_postfix = [Scalar32: "f32", Scalar64: "f64"][result.scalar_type]
   result.sin = module.add_function(cstring("llvm.sin." & type_postfix), result.scalar_unary_intrinsic_signature())
@@ -163,6 +171,24 @@ proc to_llvm(typ: Type, ctx: Context): TypeRef =
     of TypeScalar: result = ctx.scalar_type()
     of TypeBoolean: result = int1_type()
     of TypeArray: result = pointer_type(typ.item.to_llvm(ctx), 0)
+
+proc build_array(ctx: Context, item_type: TypeRef, items: openArray[ValueRef], res: cstring): ValueRef =
+  let current_block = ctx.builder.get_insert_block()
+  ctx.builder.position_builder_at_start(ctx.fn.get_entry_basic_block())
+  result = ctx.builder.build_array_alloca(
+    item_type,
+    const_nim_int(items.len),
+    res
+  )
+  ctx.builder.position_builder_at_end(current_block)
+  for it, item in items:
+    let value_ptr = ctx.builder.build_gep2(
+      item_type,
+      result,
+      [const_nim_int(it)],
+      "array_value_ptr"
+    )
+    discard ctx.builder.build_store(item, value_ptr)
 
 proc to_llvm(instrs: seq[Instr], ctx: Context) =
   let builder = ctx.builder
@@ -409,22 +435,10 @@ proc to_llvm(instrs: seq[Instr], ctx: Context) =
         let
           array_type = ctx.kernel.regs[instr.res].typ
           item_type = array_type.item.to_llvm(ctx)
-          current_block = builder.get_insert_block()
-        builder.position_builder_at_start(ctx.fn.get_entry_basic_block())
-        res = builder.build_array_alloca(
-          array_type.item.to_llvm(ctx),
-          const_nim_int(instr.args.len),
-          cstring($instr.res)
-        )
-        builder.position_builder_at_end(current_block)
+        var items = new_seq[ValueRef](instr.args.len)
         for it, arg in instr.args:
-          let value_ptr = builder.build_gep2(
-            item_type,
-            res,
-            [const_nim_int(it)],
-            "array_value_ptr"
-          )
-          discard builder.build_store(ctx[arg], value_ptr)
+          items[it] = ctx[arg]
+        res = ctx.build_array(item_type, items, cstring($instr.res))
       of InstrArrayRead:
         let
           array_type = ctx.kernel.regs[instr.args[0]].typ
@@ -442,6 +456,48 @@ proc to_llvm(instrs: seq[Instr], ctx: Context) =
         when defined(opencl):
           let source = instr.body.to_cl(instr.gpu_closure, instr.gpu_indices, ctx.kernel, ctx.program)
           ctx.gpu_sources.add(GpuKernelSource(name: "cl_kernel", source: source))
+        let gpu_kernel_id = ctx.gpu_sources.len
+        
+        var arg = 0
+        for tensor in instr.gpu_closure.tensors:
+          discard builder.build_call2(ctx.builtin.set_gpu_kernel_tensor_signature(), ctx.builtin.set_gpu_kernel_tensor, [
+            ctx.fn.get_param(0),
+            const_nim_int(gpu_kernel_id),
+            const_nim_int(arg),
+            const_nim_int(int(tensor))
+          ], cstring(""))
+          arg += 1
+        for reg in instr.gpu_closure.regs:
+          let typ = ctx.kernel.regs[reg].typ
+          case typ.kind:
+            of TypeIndex:
+              discard builder.build_call2(ctx.builtin.set_gpu_kernel_index_signature(), ctx.builtin.set_gpu_kernel_index, [
+                ctx.fn.get_param(0),
+                const_nim_int(gpu_kernel_id),
+                const_nim_int(arg),
+                ctx[reg]
+              ], cstring(""))
+            else:
+              raise GeneratorError(msg: "Unable to pass " & $reg & " of type " & $typ & " to gpu kernel")
+          arg += 1
+        
+        var
+          global_size: seq[ValueRef] = @[]
+          local_size: seq[ValueRef] = @[]
+        for it, index in instr.gpu_indices:
+          global_size.add(ctx[instr.args[it]])
+          local_size.add(const_nim_int(index.size))
+        
+        let
+          global_size_array = ctx.build_array(nim_int_type(), global_size, "global_size")
+          local_size_array = ctx.build_array(nim_int_type(), local_size, "local_size")
+        discard builder.build_call2(ctx.builtin.run_gpu_kernel_signature(), ctx.builtin.run_gpu_kernel, [
+          ctx.fn.get_param(0),
+          const_nim_int(gpu_kernel_id),
+          const_nim_int(instr.args.len),
+          global_size_array,
+          local_size_array
+        ], cstring(""))
       else:
         raise GeneratorError(msg: "Unable to generate LLVM IR for " & $instr.kind)
     
@@ -517,7 +573,8 @@ type
     run_threads*: pointer
     join_threads*: pointer
     run_gpu_kernel*: pointer
-    set_gpu_kernel_arg*: pointer
+    set_gpu_kernel_index*: pointer
+    set_gpu_kernel_tensor*: pointer
   
   Jit* = ref object
     module: ModuleRef

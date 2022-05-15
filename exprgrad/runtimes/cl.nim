@@ -157,9 +157,24 @@ proc compile*(ctx: GpuContext, name: string, source: string): GpuKernel =
 proc compile*(ctx: GpuContext, source: GpuKernelSource): GpuKernel =
   result = ctx.compile(source.name, source.source)
 
-proc run*(kernel: GpuKernel, buffers: openArray[(int, GpuBuffer)], global_size, local_size: openArray[int]) =
-  for (id, buffer) in buffers:
-    check set_kernel_arg(kernel.kernel, uint32(id), sizeof(Pmem), buffer.mem.unsafe_addr)
+proc arg*[T](kernel: GpuKernel, index: int, value: T): GpuKernel =
+  result = kernel
+  var data = value
+  check set_kernel_arg(kernel.kernel, uint32(index), sizeof(T), data.addr)
+
+proc arg*(kernel: GpuKernel, index: int, buffer: GpuBuffer): GpuKernel =
+  result = kernel
+  check set_kernel_arg(kernel.kernel, uint32(index), sizeof(Pmem), buffer.mem.unsafe_addr)
+
+proc run*(kernel: GpuKernel, group_size, local_size: openArray[int]) =
+  if group_size.len == 0:
+    raise GpuError(msg: "Group size must have at least one dimension")
+  if group_size.len != local_size.len:
+    raise GpuError(msg: "Dimension of group size must equal dimension of local size")
+  
+  var global_size = new_seq[int](group_size.len)
+  for it, local in local_size:
+    global_size[it] = local * group_size[it]
   check enqueue_nd_range_kernel(
     kernel.ctx.commands,
     kernel.kernel,
@@ -199,7 +214,11 @@ when is_main_module:
   b.write(data)
   
   let kernel = ctx.compile("add", source)
-  kernel.run({0: a, 1: b, 2: c}, [32], [32])
+  kernel
+    .arg(0, a)
+    .arg(1, b)
+    .arg(2, c)
+    .run([1], [32])
   
   echo read[float32](c)
   

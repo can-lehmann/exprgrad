@@ -106,24 +106,37 @@ when TARGET_SUPPORTS_GPU:
   proc builtin_run_gpu_kernel[T](model: ModelPtr[T],
                                  kernel_id: int,
                                  work_dims: int,
-                                 group_size: ptr int,
-                                 local_size: ptr int) = discard
-  proc builtin_set_gpu_kernel_arg[T](model: ModelPtr[T],
-                                     kernel_id: int,
-                                     size: int,
-                                     data: pointer) = discard
+                                 global_size: ptr UncheckedArray[int],
+                                 local_size: ptr UncheckedArray[int]) =
+    let kernel = model.gpu.kernels[kernel_id - 1]
+    var group_size: seq[int] = @[]
+    for it in 0..<work_dims:
+      group_size.add(global_size[it] div local_size[it]) # TODO: Handle tiles at border!
+    kernel.run(
+      group_size,
+      to_open_array(local_size, 0, work_dims - 1)
+    )
+  
+  proc builtin_set_gpu_kernel_index[T](model: ModelPtr[T], kernel_id, index: int, value: int) =
+    discard model.gpu.kernels[kernel_id - 1].arg(index, value)
+  
+  proc builtin_set_gpu_kernel_tensor[T](model: ModelPtr[T], kernel_id, index: int, tensor: int) =
+    discard model.gpu.kernels[kernel_id - 1].arg(index, model.gpu.tensors[tensor - 1].buffer)
   {.pop.}
 else:
   {.push cdecl.}
   proc builtin_run_gpu_kernel[T](model: ModelPtr[T],
                                  kernel_id: int,
                                  work_dims: int,
-                                 group_size: ptr int,
-                                 local_size: ptr int) = discard
-  proc builtin_set_gpu_kernel_arg[T](model: ModelPtr[T],
-                                     kernel_id: int,
-                                     size: int,
-                                     data: pointer) = discard
+                                 global_size: ptr UncheckedArray[int],
+                                 local_size: ptr UncheckedArray[int]) =
+    discard
+  
+  proc builtin_set_gpu_kernel_index[T](model: ModelPtr[T], kernel_id, index: int, value: int) =
+    discard
+  
+  proc builtin_set_gpu_kernel_tensor[T](model: ModelPtr[T], kernel_id, index: int, tensor: int) =
+    discard
   {.pop.}
 
 proc init_builtin[T](): JitBuiltin =
@@ -138,7 +151,8 @@ proc init_builtin[T](): JitBuiltin =
     run_threads: builtin_run_threads[T],
     join_threads: builtin_join_threads[T],
     run_gpu_kernel: builtin_run_gpu_kernel[T],
-    set_gpu_kernel_arg: builtin_set_gpu_kernel_arg[T]
+    set_gpu_kernel_index: builtin_set_gpu_kernel_index[T],
+    set_gpu_kernel_tensor: builtin_set_gpu_kernel_tensor[T]
   )
 
 proc new_gpu_model[T](ctx: GpuContext, sources: seq[GpuKernelSource]): GpuModel[T] =

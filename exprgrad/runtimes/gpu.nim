@@ -41,9 +41,11 @@ else:
   proc read*[T](buffer: GpuBuffer): seq[T] = raise GpuError(msg: MESSAGE)
   proc compile*(ctx: GpuContext, name, source: string): GpuKernel = raise GpuError(msg: MESSAGE)
   proc compile*(ctx: GpuContext, source: GpuKernelSource): GpuKernel = raise GpuError(msg: MESSAGE)
-  proc run*(kernel: GpuKernel, buffers: openArray[(int, GpuBuffer)], global_size, local_size: openArray[int]) = raise GpuError(msg: MESSAGE)
+  proc arg*[T](kernel: GpuKernel, index: int, value: T): GpuKernel = raise GpuError(msg: MESSAGE)
+  proc arg*(kernel: GpuKernel, index: int, buffer: GpuBuffer): GpuKernel = raise GpuError(msg: MESSAGE)
+  proc run*(kernel: GpuKernel, global_size, local_size: openArray[int]) = raise GpuError(msg: MESSAGE)
 
 type GpuTensor*[T] = ref object
   shape*: seq[int]
-  buffer: GpuBuffer
+  buffer*: GpuBuffer
 
