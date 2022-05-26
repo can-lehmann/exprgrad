@@ -14,7 +14,7 @@
 
 
 import std/[os, sugar, times]
-import exprgrad, exprgrad/[io/idxformat, io/ppmformat, layers/base, layers/dnn, io/dotgraph, io/serialize]
+import exprgrad, exprgrad/[io/idxformat, io/ppmformat, layers/base, layers/dnn, graphics/dotgraph, io/serialize]
 
 proc load_mnist[T](path: string):
     tuple[train_x, train_y, test_x, test_y: Tensor[T]] =
