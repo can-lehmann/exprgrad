@@ -71,7 +71,14 @@ $ nimble install exprgrad
 **Note:** Your version of Ubuntu may not have the `llvm-13-dev` package in its repositories.
 Follow the instructions at [apt.llvm.org](https://apt.llvm.org/) to install the required repository.
 
-### Fedora
+### Fedora 36
+
+```bash
+$ sudo dnf install llvm13-devel
+$ nimble install exprgrad
+```
+
+### Fedora 35
 
 ```bash
 $ sudo dnf install llvm-devel
