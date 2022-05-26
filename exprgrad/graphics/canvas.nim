@@ -1,0 +1,227 @@
+# Copyright 2022 Can Joshua Lehmann
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http:/www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Common abstraction over vector graphics backends
+
+import std/[macros, strutils]
+import geometry
+
+type Color* = object
+  r*: uint8
+  g*: uint8
+  b*: uint8
+  a*: uint8
+
+{.push inline.}
+proc rgba*(r, g, b, a: uint8): Color = Color(r: r, g: g, b: b, a: a)
+proc rgb*(r, g, b: uint8): Color = Color(r: r, g: g, b: b, a: 255)
+proc grey*(value: uint8): Color = Color(r: value, g: value, b: value, a: 255)
+{.pop.}
+
+proc to_hex*(color: Color): string =
+  const DIGITS = "0123456789abcdef"
+  template component(value: uint8): string =
+    DIGITS[int(value shr 4) and 0xf] & DIGITS[int(value) and 0xf]
+  result = "#"
+  result &= component(color.r)
+  result &= component(color.g)
+  result &= component(color.b)
+  if color.a != 255:
+    result &= component(color.a)
+
+type
+  PathPoint* = object
+    pos: Vec2
+  
+  Path* = object
+    points: seq[PathPoint]
+    closed: bool
+  
+  ShapeKind* = enum
+    ShapeRect, ShapeEllipse, ShapeLine, ShapePath
+  
+  ShapeStyle* = object
+    stroke*: Color
+    fill*: Color
+    stroke_width*: float64
+  
+  Shape* = object
+    style*: ShapeStyle
+    case kind*: ShapeKind:
+      of ShapeRect, ShapeEllipse:
+        pos*: Vec2
+        size*: Vec2
+      of ShapeLine:
+        start*: Vec2
+        stop*: Vec2
+      of ShapePath:
+        subpaths*: seq[Path]
+  
+  Canvas* = object
+    size*: Vec2
+    background*: Color
+    shapes*: seq[Shape]
+
+proc init_canvas*(size: Vec2, background: Color = Color()): Canvas =
+  result = Canvas(size: size, background: background)
+
+const DEFAULT_SHAPE_STYLE = ShapeStyle(stroke: grey(0), stroke_width: 1.0)
+
+macro default_style(param_node: untyped, default: static[ShapeStyle], proc_node: untyped): untyped =
+  result = proc_node.copy_nim_tree()
+  let
+    name = nim_ident_normalize(param_node.str_val)
+    new_params = new_tree(nnkFormalParams)
+    call = new_tree(nnkCall, proc_node.name)
+  for it, param in proc_node.params:
+    if it > 0 and param[0].eq_ident(name):
+      let constr = new_tree(nnkObjConstr, bind_sym("ShapeStyle"))
+      for name, value in default.field_pairs:
+        let def = new_tree(nnkIdentDefs, ident(name), new_empty_node(), new_lit(value))
+        new_params.add(def)
+        constr.add(new_tree(nnkExprColonExpr, ident(name), ident(name)))
+      call.add(constr)
+    else:
+      new_params.add(param.copy_nim_tree())
+      for it2 in 0..<(param.len - 2):
+        call.add(param[it2])
+  result.params = new_params
+  result.body = new_stmt_list(call)
+  result = new_stmt_list(proc_node, result)
+
+proc rect*(canvas: var Canvas,
+           pos, size: Vec2,
+           style: ShapeStyle) {.default_style(style, DEFAULT_SHAPE_STYLE).} =
+  canvas.shapes.add(Shape(kind: ShapeRect, pos: pos, size: size, style: style))
+
+proc ellipse*(canvas: var Canvas,
+              pos, size: Vec2,
+              style: ShapeStyle) {.default_style(style, DEFAULT_SHAPE_STYLE).} =
+  canvas.shapes.add(Shape(kind: ShapeEllipse, pos: pos, size: size, style: style))
+
+proc line*(canvas: var Canvas,
+           start, stop: Vec2,
+           style: ShapeStyle) {.default_style(style, DEFAULT_SHAPE_STYLE).} =
+  canvas.shapes.add(Shape(kind: ShapeLine, start: start, stop: stop, style: style))
+
+proc path*(canvas: var Canvas,
+           path: Path,
+           style: ShapeStyle) {.default_style(style, DEFAULT_SHAPE_STYLE).} =
+  canvas.shapes.add(Shape(kind: ShapePath, subpaths: @[path], style: style))
+
+type XmlBuilder = object
+  data: string
+
+proc emit(builder: var XmlBuilder, text: string) =
+  builder.data.add(text)
+
+proc begin_tag(builder: var XmlBuilder,
+               name: string,
+               attrs: openArray[(string, string)]) =
+  builder.emit("<")
+  builder.emit(name)
+  for (name, value) in attrs:
+    builder.emit(" ")
+    builder.emit(name)
+    builder.emit("=\"")
+    builder.emit(value)
+    builder.emit("\"")
+  builder.emit(">")
+
+proc end_tag(builder: var XmlBuilder, name: string) =
+  builder.emit("</")
+  builder.emit(name)
+  builder.emit(">")
+
+proc tag(builder: var XmlBuilder,
+         name: string,
+         attrs: openArray[(string, string)]) =
+  builder.begin_tag(name, attrs)
+  builder.end_tag(name)
+
+template tag(builder: var XmlBuilder,
+             name: string,
+             attrs: openArray[(string, string)],
+             body: untyped) =
+  block:
+    builder.begin_tag(name, attrs)
+    defer: builder.end_tag(name)
+    body
+
+proc to_svg(color: Color): string =
+  if color == Color():
+    result = "none"
+  else:
+    result = color.to_hex()
+
+proc to_svg_attrs(style: ShapeStyle): seq[(string, string)] =
+  result = @{
+    "fill": style.fill.to_svg(),
+    "stroke": style.stroke.to_svg(),
+    "stroke-width": $style.stroke_width
+  }
+
+proc gen_svg(shape: Shape, builder: var XmlBuilder) =
+  let attrs = shape.style.to_svg_attrs()
+  case shape.kind:
+    of ShapeRect:
+      builder.tag("rect", attrs & @{
+        "x": $shape.pos.x,
+        "y": $shape.pos.y,
+        "width": $shape.size.x,
+        "height": $shape.size.y
+      })
+    of ShapeEllipse:
+      builder.tag("ellipse", attrs & @{
+        "cx": $shape.pos.x,
+        "cy": $shape.pos.y,
+        "rx": $shape.size.x,
+        "ry": $shape.size.y
+      })
+    of ShapeLine:
+      builder.tag("line", attrs & @{
+        "x1": $shape.start.x,
+        "y1": $shape.start.y,
+        "x2": $shape.stop.x,
+        "y2": $shape.stop.y
+      })
+    of ShapePath:
+      discard
+
+proc gen_svg(canvas: Canvas, builder: var XmlBuilder) =
+  let attrs = {
+    "xmlns": "http://www.w3.org/2000/svg",
+    "width": $canvas.size.x,
+    "height": $canvas.size.y,
+    "viewBox": "0 0 " & $canvas.size.x & " " & $canvas.size.y
+  }
+  builder.tag("svg", attrs):
+    if canvas.background != Color():
+      builder.tag("rect", {
+        "x": "0",
+        "y": "0",
+        "width": $canvas.size.x,
+        "height": $canvas.size.y,
+        "fill": canvas.background.to_svg()
+      })
+    for shape in canvas.shapes:
+      shape.gen_svg(builder)
+
+proc to_svg*(canvas: Canvas): string =
+  var builder = XmlBuilder()
+  canvas.gen_svg(builder)
+  result = builder.data
+
+proc save_svg*(canvas: Canvas, path: string) =
+  write_file(path, canvas.to_svg())
