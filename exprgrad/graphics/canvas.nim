@@ -73,7 +73,7 @@ type
     background*: Color
     shapes*: seq[Shape]
 
-proc init_canvas*(size: Vec2, background: Color = Color()): Canvas =
+proc init*(_: typedesc[Canvas], size: Vec2, background: Color = Color()): Canvas =
   result = Canvas(size: size, background: background)
 
 const DEFAULT_SHAPE_STYLE = ShapeStyle(stroke: grey(0), stroke_width: 1.0)
@@ -104,6 +104,11 @@ proc rect*(canvas: var Canvas,
            pos, size: Vec2,
            style: ShapeStyle) {.default_style(style, DEFAULT_SHAPE_STYLE).} =
   canvas.shapes.add(Shape(kind: ShapeRect, pos: pos, size: size, style: style))
+
+proc rect*(canvas: var Canvas,
+           box: Box2,
+           style: ShapeStyle) {.default_style(style, DEFAULT_SHAPE_STYLE).} =
+  canvas.shapes.add(Shape(kind: ShapeRect, pos: box.min, size: box.size, style: style))
 
 proc ellipse*(canvas: var Canvas,
               pos, size: Vec2,

@@ -86,7 +86,15 @@ proc length*[T](vec: Vector2[T]): float64 =
 
 proc normalize*[T](vec: Vector2[T]): Vector2[T] =
   result = vec / T(vec.length())
+
+proc to_vec2*(index: Index2): Vec2 =
+  result = Vec2(x: float64(index.x), y: float64(index.y))
 {.pop.}
+
+type Axis2* = enum AxisX, AxisY
+
+proc `[]`*[T](vec: Vector2[T], axis: Axis2): T {.inline.} =
+  result = [vec.x, vec.y][ord(axis)]
 
 type
   BoundingBox*[T] = object
@@ -94,7 +102,13 @@ type
     max*: T
   
   BoundingBox2*[T] = BoundingBox[Vector2[T]]
+  Inter* = BoundingBox[float64]
   Box2* = BoundingBox2[float64]
 
 proc size*[T](box: BoundingBox[T]): T {.inline.} = box.max - box.min
 
+proc x_inter*[T](box: BoundingBox2[T]): BoundingBox[T] =
+  result = BoundingBox[T](min: box.min.x, max: box.max.x)
+
+proc y_inter*[T](box: BoundingBox2[T]): BoundingBox[T] =
+  result = BoundingBox[T](min: box.min.y, max: box.max.y)
