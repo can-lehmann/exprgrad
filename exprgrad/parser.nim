@@ -305,7 +305,7 @@ proc alloc_tensors(fun: Fun, program: Program) =
       of FunTarget: fun.tensor = fun.children[0].tensor
       else: discard
 
-proc flatten(fun: Fun, target: var Target) =
+proc flatten(fun: Fun, target: Target) =
   if target.name notin fun.targets:
     for child in fun.children:
       child.flatten(target)
@@ -393,7 +393,7 @@ proc to_program*(graphs: openArray[Fun]): Program =
     fun.alloc_tensors(result)
     fun.collect_targets(targets)
   for name, fun in targets:
-    var target = Target(
+    let target = Target(
       name: name,
       output: fun.tensor,
       compile_target: fun.compile_target

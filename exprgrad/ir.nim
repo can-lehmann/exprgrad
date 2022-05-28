@@ -214,7 +214,7 @@ type
   
   CompileTarget* = enum CompileCpu, CompileThreads, CompileGpu
   
-  Target* = object
+  Target* = ref object
     name*: string
     output*: TensorId
     tensors*: HashSet[TensorId]

@@ -14,6 +14,9 @@
 
 # Common interface for interacting with the GPU
 
+import std/math
+import ../tensors
+
 when defined(opencl):
   import cl
   export cl
@@ -38,6 +41,9 @@ else:
   proc alloc_buffer*(ctx: GpuContext, size: int): GpuBuffer = raise GpuError(msg: MESSAGE)
   proc write*(buffer: GpuBuffer, data: pointer, size: int) = raise GpuError(msg: MESSAGE)
   proc write*[T](buffer: GpuBuffer, data: openArray[T]) = raise GpuError(msg: MESSAGE)
+  proc fill*[T](buffer: GpuBuffer, value: T) = raise GpuError(msg: MESSAGE)
+  proc read_into*[T](buffer: GpuBuffer, data: ptr UncheckedArray[T]) = raise GpuError(msg: MESSAGE)
+  proc read_into*[T](buffer: GpuBuffer, data: var seq[T]) = raise GpuError(msg: MESSAGE)
   proc read*[T](buffer: GpuBuffer): seq[T] = raise GpuError(msg: MESSAGE)
   proc compile*(ctx: GpuContext, name, source: string): GpuKernel = raise GpuError(msg: MESSAGE)
   proc compile*(ctx: GpuContext, source: GpuKernelSource): GpuKernel = raise GpuError(msg: MESSAGE)
@@ -49,3 +55,25 @@ type GpuTensor*[T] = ref object
   shape*: seq[int]
   buffer*: GpuBuffer
 
+proc alloc_tensor*[T](ctx: GpuContext, shape: openArray[int]): GpuTensor[T] =
+  result = GpuTensor[T](
+    shape: @shape,
+    buffer: ctx.alloc_buffer(shape.prod() * sizeof(T))
+  )
+
+proc read_into*[T](gpu: GpuTensor[T], tensor: Tensor[T]) =
+  assert tensor.shape == gpu.shape
+  gpu.buffer.read_into(tensor.data)
+
+proc read*[T](gpu: GpuTensor[T]): Tensor[T] =
+  result = new_tensor[T](gpu.shape)
+  gpu.read_into(result)
+
+proc write*[T](gpu: GpuTensor[T], tensor: Tensor[T]) =
+  gpu.buffer.write(tensor.data.to_open_array(0, tensor.len - 1))
+
+proc fill*[T](gpu: GpuTensor[T], value: T) =
+  gpu.buffer.fill(value)
+
+proc dealloc[T](tensor: GpuTensor[T]) =
+  tensor.mem.dealloc()

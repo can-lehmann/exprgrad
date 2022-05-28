@@ -485,7 +485,7 @@ proc to_llvm(instrs: seq[Instr], ctx: Context) =
           global_size: seq[ValueRef] = @[]
           local_size: seq[ValueRef] = @[]
         for it, index in instr.gpu_indices:
-          global_size.add(ctx[instr.args[it]])
+          global_size.add(ctx[instr.args[2 * it + 1]])
           local_size.add(const_nim_int(index.size))
         
         let
@@ -494,7 +494,7 @@ proc to_llvm(instrs: seq[Instr], ctx: Context) =
         discard builder.build_call2(ctx.builtin.run_gpu_kernel_signature(), ctx.builtin.run_gpu_kernel, [
           ctx.fn.get_param(0),
           const_nim_int(gpu_kernel_id),
-          const_nim_int(instr.args.len),
+          const_nim_int(instr.args.len div 2),
           global_size_array,
           local_size_array
         ], cstring(""))
@@ -545,13 +545,14 @@ proc to_llvm*(program: Program): (ModuleRef, seq[GpuKernelSource]) =
       target: name,
       tensors: new_seq[ValueRef](program.tensors.len)
     )
-    for tensor_id in target.tensors:
-      ctx[tensor_id] = builder.build_call2(
-        ctx.builtin.tensor_signature(),
-        ctx.builtin.tensor,
-        [ctx.fn.get_param(0), const_nim_int(int(tensor_id))],
-        cstring($tensor_id)
-      )
+    if target.compile_target in {CompileCpu, CompileThreads}:
+      for tensor_id in target.tensors:
+        ctx[tensor_id] = builder.build_call2(
+          ctx.builtin.tensor_signature(),
+          ctx.builtin.tensor,
+          [ctx.fn.get_param(0), const_nim_int(int(tensor_id))],
+          cstring($tensor_id)
+        )
     for it, kernel in target.kernels:
       ctx.kernel = kernel
       ctx.kernel_id = KernelId(it + 1)

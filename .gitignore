@@ -23,6 +23,8 @@ tests/test_csv
 tests/test_gpu
 tests/test_idxformat
 tests/data.bin
+tests/module.bc
+tests/module.ll
 old/
 docs/assets/social-banner/
 data.bin

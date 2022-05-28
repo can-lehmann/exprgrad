@@ -476,7 +476,7 @@ proc derive*(kernel: Kernel, grad_tensors: Table[TensorId, TensorId]): seq[Kerne
       grad_kernel.dead_code_elim()
       result.add(grad_kernel)
 
-proc copy_shape(target: var Target, dest, src: TensorId) =
+proc copy_shape(target: Target, dest, src: TensorId) =
   target.shapes.add(ShapeConstraint(kind: ShapeCopy, dest: dest, src: src))
 
 proc generate*(program: Program) =
@@ -2037,7 +2037,7 @@ proc inline_loop(kernel: Kernel, compile_target: CompileTarget) =
   kernel.expr.instrs.insert(loop.start.setup)
   kernel.expr.instrs.insert(loop.stop.setup)
 
-proc inline_loops(target: var Target, cur, until_level: int) =
+proc inline_loops(target: Target, cur, until_level: int) =
   let kernel = target.kernels[cur]
   while kernel.loops.len > until_level:
     while kernel.loops[^1].fuse_next:

@@ -14,24 +14,27 @@
 
 # Simple API used to compile and run models in exprgrad
 
-import std/[tables, sets]
+import std/[tables, sets, math]
 import ir, parser, passes, tensors, llvmgen, irprint, runtimes/gpu
 
 type
   GpuModel[T] = ref object
     ctx: GpuContext
     kernels: seq[GpuKernel]
-    params: Table[TensorId, GpuTensor[T]]
-    caches: Table[TensorId, GpuTensor[T]]
     tensors: seq[GpuTensor[T]]
+  
+  CpuModel[T] = ref object
+    tensors: seq[Tensor[T]]
   
   ModelObj[T] = object
     program*: Program
     jit: Jit
+    state_location: set[CompileTarget]
+    cpu: CpuModel[T]
     gpu: GpuModel[T]
+    shapes: seq[seq[int]]
     params*: Table[TensorId, Tensor[T]]
     caches*: Table[TensorId, Tensor[T]]
-    tensors: seq[Tensor[T]]
     epoch*: int
   
   ModelPtr[T] = ptr ModelObj[T]
@@ -41,20 +44,20 @@ proc `$`(kernel: Kernel): string = $(kernel[])
 
 {.push cdecl.}
 proc builtin_tensor[T](model: ModelPtr[T], id: int): ptr UncheckedArray[T] =
-  result = model[].tensors[TensorId(id)].data_ptr
+  result = model[].cpu.tensors[TensorId(id)].data_ptr
 
 proc builtin_shape[T](model: ModelPtr[T], id, dim: int): int =
-  let tensor = model[].tensors[TensorId(id)]
-  if dim < 0:
-    result = tensor.shape[tensor.shape.len + dim]
-  else:
-    result = tensor.shape[dim]
+  let shape = model[].shapes[TensorId(id)]
+  var index = dim
+  if index < 0:
+    index += shape.len
+  result = shape[index]
 
 proc builtin_len[T](model: ModelPtr[T], id: int): int =
-  result = model[].tensors[TensorId(id)].len
+  result = model[].shapes[TensorId(id)].prod()
 
 proc builtin_shape_len[T](model: ModelPtr[T], id: int): int =
-  result = model[].tensors[TensorId(id)].shape.len
+  result = model[].shapes[TensorId(id)].len
 
 proc builtin_debug_index[T](model: ModelPtr[T], value: int) =
   echo value
@@ -155,8 +158,13 @@ proc init_builtin[T](): JitBuiltin =
     set_gpu_kernel_tensor: builtin_set_gpu_kernel_tensor[T]
   )
 
-proc new_gpu_model[T](ctx: GpuContext, sources: seq[GpuKernelSource]): GpuModel[T] =
+proc new_cpu_model[T](program: Program): CpuModel[T] =
+  result = CpuModel[T]()
+  result.tensors = new_seq[Tensor[T]](program.tensors.len)
+
+proc new_gpu_model[T](program: Program, ctx: GpuContext, sources: seq[GpuKernelSource]): GpuModel[T] =
   result = GpuModel[T](ctx: ctx)
+  result.tensors = new_seq[GpuTensor[T]](program.tensors.len)
   for source in sources:
     result.kernels.add(ctx.compile(source))
 
@@ -165,14 +173,16 @@ proc new_model*[T](program: Program,
                    caches: Table[TensorId, Tensor[T]],
                    gpu_ctx: GpuContext): Model[T] =
   result = Model[T](program: program, params: params, caches: caches)
-  result.tensors = new_seq[Tensor[T]](program.tensors.len)
+  result.state_location = {CompileCpu, CompileThreads}
+  result.shapes = new_seq[seq[int]](program.tensors.len)
   
   let
     builtin = init_builtin[T]()
     (module, gpu_sources) = program.to_llvm()
   result.jit = new_jit(module, builtin)
+  result.cpu = new_cpu_model[T](program)
   if not gpu_ctx.is_nil:
-    result.gpu = new_gpu_model[T](gpu_ctx, gpu_sources)
+    result.gpu = new_gpu_model[T](program, gpu_ctx, gpu_sources)
 
 proc new_model*[T](program: Program, gpu_ctx: GpuContext): Model[T] =
   bind `==`
@@ -245,52 +255,133 @@ proc compile*[T](graphs: varargs[Fun], gpu: GpuContext = nil): Model[T] =
   program.compile()
   result = new_model[T](program, gpu)
 
-proc alloc_shapes[T](model: Model[T], target: string, shapes: Table[ir.TensorId, seq[int]]) =
+proc alloc_shapes[T](cpu: CpuModel[T], model: Model[T], target: Target, shapes: Table[ir.TensorId, seq[int]]) =
   for tensor_id, shape in shapes.pairs:
     let
       tensor_def = model.program.tensors[tensor_id]
-      required = tensor_id in model.program.targets[target].tensors
+      required = tensor_id in target.tensors
     
     case tensor_def.kind:
       of TensorInput: discard
-      of TensorParam: model.tensors[tensor_id] = model.params[tensor_id]
-      of TensorCache: model.tensors[tensor_id] = model.caches[tensor_id]
+      of TensorParam: cpu.tensors[tensor_id] = model.params[tensor_id]
+      of TensorCache: cpu.tensors[tensor_id] = model.caches[tensor_id]
       of TensorRandom:
         if required:
-          if model.tensors[tensor_id].is_nil:
-            model.tensors[tensor_id] = alloc_tensor[T]()
-          model.tensors[tensor_id].alloc_shape(shape, fill_zero=false)
-          model.tensors[tensor_id].fill_rand(
+          if cpu.tensors[tensor_id].is_nil:
+            cpu.tensors[tensor_id] = alloc_tensor[T]()
+          cpu.tensors[tensor_id].alloc_shape(shape, fill_zero=false)
+          cpu.tensors[tensor_id].fill_rand(
             T(tensor_def.random_range.a)..
             T(tensor_def.random_range.b)
           )
       of TensorResult:
         if required:
-          if model.tensors[tensor_id].is_nil:
-            model.tensors[tensor_id] = new_tensor[T](shape)
+          if cpu.tensors[tensor_id].is_nil:
+            cpu.tensors[tensor_id] = new_tensor[T](shape)
           else:
-            model.tensors[tensor_id].alloc_shape(shape, fill_zero=true)
+            cpu.tensors[tensor_id].alloc_shape(shape, fill_zero=true)
 
-proc call_jit[T](model: Model[T], target: string): Tensor[T] =
-  let fn = get_proc[proc (model: ModelPtr[T]) {.cdecl.}](model.jit, "target_" & target)
+proc alloc_shapes[T](gpu: GpuModel[T], model: Model[T], target: Target, shapes: Table[ir.TensorId, seq[int]]) =
+  for tensor_id, shape in shapes.pairs:
+    let tensor_def = model.program.tensors[tensor_id]
+    if tensor_id notin target.tensors:
+      continue
+    
+    case tensor_def.kind:
+      of TensorInput, TensorParam, TensorCache: discard
+      of TensorRandom:
+        if gpu.tensors[tensor_id].is_nil or gpu.tensors[tensor_id].shape != shape:
+          gpu.tensors[tensor_id] = alloc_tensor[T](gpu.ctx, shape)
+        let slice = T(tensor_def.random_range.a)..T(tensor_def.random_range.b)
+        gpu.tensors[tensor_id].write(new_rand_tensor(shape, slice))
+      of TensorResult:
+        if gpu.tensors[tensor_id].is_nil or gpu.tensors[tensor_id].shape != shape:
+          gpu.tensors[tensor_id] = alloc_tensor[T](gpu.ctx, shape)
+        gpu.tensors[tensor_id].fill(T(0))
+
+iterator state_tensors[T](model: Model[T]): (TensorId, Tensor[T]) =
+  for id, tensor in pairs(model.params):
+    yield (id, tensor)
+  for id, tensor in pairs(model.caches):
+    yield (id, tensor)
+
+proc flush_state_tensors[T](model: Model[T], to: CompileTarget) =
+  if to in model.state_location:
+    return
+  case to:
+    of CompileCpu, CompileThreads:
+      if CompileCpu in model.state_location or
+         CompileThreads in model.state_location:
+        return
+      assert CompileGpu in model.state_location
+      for id, tensor in model.state_tensors:
+        model.gpu.tensors[id].read_into(tensor)
+    of CompileGpu:
+      assert CompileCpu in model.state_location or
+             CompileThreads in model.state_location
+      for id, tensor in model.state_tensors:
+        if model.gpu.tensors[id].is_nil or
+           model.gpu.tensors[id].shape != tensor.shape:
+          model.gpu.tensors[id] = alloc_tensor[T](model.gpu.ctx, tensor.shape)
+        model.gpu.tensors[id].write(tensor)
+  model.state_location.incl(to)
+
+proc alloc_shapes[T](model: Model[T], target: Target, shapes: Table[ir.TensorId, seq[int]]) =
+  model.flush_state_tensors(target.compile_target)
+  for id, shape in pairs(shapes):
+    model.shapes[id] = shape
+  case target.compile_target:
+    of CompileCpu, CompileThreads:
+      model.cpu.alloc_shapes(model, target, shapes)
+    of CompileGpu:
+      model.gpu.alloc_shapes(model, target, shapes)
+
+proc write_input[T](model: Model[T], to: CompileTarget, name: string, tensor: Tensor[T]) =
+  if name notin model.program.inputs:
+    raise new_exception(ValueError, name & " is not an input to the model")
+  let tensor_id = model.program.inputs[name]
+  case to:
+    of CompileCpu, CompileThreads:
+      model.cpu.tensors[tensor_id] = tensor
+    of CompileGpu:
+      if model.gpu.tensors[tensor_id].is_nil or
+         model.gpu.tensors[tensor_id].shape != tensor.shape:
+        model.gpu.tensors[tensor_id] = alloc_tensor[T](model.gpu.ctx, tensor.shape)
+      model.gpu.tensors[tensor_id].write(tensor)
+
+proc read_output[T](model: Model[T], target: CompileTarget, tensor: TensorId): Tensor[T] =
+  case target:
+    of CompileCpu, CompileThreads:
+      result = model.cpu.tensors[tensor]
+      model.cpu.tensors[tensor] = nil
+    of CompileGpu:
+      result = model.gpu.tensors[tensor].read()
+
+proc zero_result_tensor[T](model: Model[T], target: CompileTarget, tensor_id: TensorId) =
+  case target:
+    of CompileCpu, CompileThreads:
+      model.cpu.tensors[tensor_id].fill_zero()
+    of CompileGpu:
+      model.gpu.tensors[tensor_id].fill(T(0))
+
+proc call_jit[T](model: Model[T], target_name: string): Tensor[T] =
+  let fn = get_proc[proc (model: ModelPtr[T]) {.cdecl.}](model.jit, "target_" & target_name)
   fn(model[].addr)
-  let output = model.program.targets[target].output
-  if int(output) != 0:
-    result = model.tensors[output]
-    model.tensors[output] = nil
+  let target = model.program.targets[target_name]
+  if int(target.output) != 0:
+    result = model.read_output(target.compile_target, target.output)
 
 proc call*[T](model: Model[T],
-              target: string,
+              target_name: string,
               args: openArray[(string, Tensor[T])] = []): Tensor[T] =
+  let target = model.program.targets[target_name]
   var input_shapes = new_seq[(TensorId, seq[int])](args.len)
   for it, (name, tensor) in args:
-    if name notin model.program.inputs:
-      raise new_exception(ValueError, name & " is not an input to the model")
+    model.write_input(target.compile_target, name, tensor)
     input_shapes[it] = (model.program.inputs[name], tensor.shape)
-    model.tensors[model.program.inputs[name]] = tensor
-  let shapes = model.program.infer_shapes(target, input_shapes)
+  let shapes = model.program.infer_shapes(target_name, input_shapes)
   model.alloc_shapes(target, shapes)
-  result = model.call_jit(target)
+  result = model.call_jit(target_name)
 
 proc apply*[T](model: Model[T],
                target: string,
@@ -298,12 +389,14 @@ proc apply*[T](model: Model[T],
   discard model.call(target, args)
 
 proc fit*[T](model: Model[T],
-             target: string,
+             target_name: string,
              args: openArray[(string, Tensor[T])],
              batch_size: int = 32) =
   if args.len == 0:
     raise new_exception(ValueError, "Model.fit requires at least one input tensor. Use Model.apply instead if the target has zero inputs.")
-  let batch_count = args[0][1].shape[0] div batch_size
+  let
+    target = model.targets[target]
+    batch_count = args[0][1].shape[0] div batch_size
   
   var input_shapes = new_seq[(TensorId, seq[int])](args.len)
   for it, (name, arg) in args:
@@ -311,7 +404,7 @@ proc fit*[T](model: Model[T],
       raise new_exception(ValueError, name & " is not an input to the model")
     input_shapes[it] = (model.program.inputs[name], @[batch_size] & arg.shape[1..^1])
   
-  let shapes = model.program.infer_shapes(target, input_shapes)
+  let shapes = model.program.infer_shapes(target_name, input_shapes)
   model.alloc_shapes(target, shapes)
   
   model.epoch += 1
@@ -320,14 +413,13 @@ proc fit*[T](model: Model[T],
     stdout.flush_file()
     let offset = batch_size * batch_id
     for it, (name, arg) in args:
-      let id = model.program.inputs[name]
-      model.tensors[id] = arg.view_first(offset, batch_size)
+      model.write_input(target.compile_target, name, arg.view_first(offset, batch_size))
     
-    discard model.call_jit(target)
+    discard model.call_jit(target_name)
     
-    for tensor in model.program.targets[target].tensors.items:
+    for tensor in target.tensors.items:
       if model.program.tensors[tensor].kind == TensorResult:
-        model.tensors[tensor].fill_zero()
+        model.zero_result_tensor(target.compile_target, tensor)
   
   stdout.write($batch_count & "/" & $batch_count & "\r")
   stdout.write("\n")

@@ -105,6 +105,9 @@ proc alloc_buffer*(ctx: GpuContext, size: int): GpuBuffer =
   result.mem = create_buffer(ctx.context, MEM_READ_WRITE, size, nil, status.addr)
   check status
 
+proc dealloc*(buffer: GpuBuffer) =
+  check release_mem_object(buffer.mem)
+
 proc write*(buffer: GpuBuffer, data: pointer, size: int) =
   if size != buffer.size:
     raise GpuError(msg: "Attempted to write " & $size & " bytes, but the size of the buffer is " & $buffer.size & " bytes")
@@ -115,6 +118,24 @@ proc write*(buffer: GpuBuffer, data: pointer, size: int) =
 proc write*[T](buffer: GpuBuffer, data: openArray[T]) =
   if data.len > 0:
     buffer.write(data[0].unsafe_addr, sizeof(T) * data.len)
+
+proc fill*[T](buffer: GpuBuffer, value: T) =
+  var val = value
+  check buffer.ctx.commands.enqueue_fill_buffer(
+    buffer.mem, val.addr, sizeof(T), 0, buffer.size, 0, nil, nil
+  )
+
+proc read_into*[T](buffer: GpuBuffer, data: ptr UncheckedArray[T]) =
+  check buffer.ctx.commands.enqueue_read_buffer(
+    buffer.mem, CL_TRUE, 0, buffer.size, data[0].addr, 0, nil, nil
+  )
+
+proc read_into*[T](buffer: GpuBuffer, data: var seq[T]) =
+  if buffer.size != data.len * sizeof(T):
+    raise GpuError(msg: "Buffer size is not equal to target size")
+  check buffer.ctx.commands.enqueue_read_buffer(
+    buffer.mem, CL_TRUE, 0, buffer.size, data[0].addr, 0, nil, nil
+  )
 
 proc read*[T](buffer: GpuBuffer): seq[T] =
   if buffer.size mod sizeof(T) != 0:
@@ -127,6 +148,7 @@ proc read*[T](buffer: GpuBuffer): seq[T] =
 
 proc compile*(ctx: GpuContext, name: string, source: string): GpuKernel =
   result = GpuKernel(ctx: ctx)
+  echo source
   
   let strings = alloc_cstring_array([source])
   defer: dealloc_cstring_array(strings)

@@ -37,9 +37,22 @@ test "matmul/passes":
   program.compile()
   echo program.targets["c"]
 
-test "matmul/compile":
+test "matmul/compile/basic":
   let
-    a = input("a", [1024, -1])
+    a = input("a", [64, 64])
+    b = input("b", [64, 64])
+  c*[y, x] ++= a[y, it] * b[it, x] | (x, y, it)
+  when TARGET_SUPPORTS_GPU:
+    let
+      program = compile[float32](c.target("c", CompileGpu), gpu=new_gpu_context())
+      a_tensor = new_rand_tensor[float32]([64, 64], float32(0)..float32(1))
+      b_tensor = new_rand_tensor[float32]([64, 64], float32(0)..float32(1))
+      expected = a_tensor * b_tensor
+    check squares(program.call("c", {"a": a_tensor, "b": b_tensor}) - expected).sum() < 0.1
+
+test "matmul/compile/schedule":
+  let
+    a = input("a", [64, -1])
     b = input("b")
   c*[y, x] ++= a[y, it] * b[it, x] | (x, y, it) do:
     schedule:
@@ -53,7 +66,12 @@ test "matmul/compile":
         tile_size(it, 16)
         tile(it)
   when TARGET_SUPPORTS_GPU:
-    let program = compile[float32](c.target("c", CompileGpu), gpu=new_gpu_context())
+    let
+      program = compile[float32](c.target("c", CompileGpu), gpu=new_gpu_context())
+      a_tensor = new_rand_tensor[float32]([64, 64], float32(0)..float32(1))
+      b_tensor = new_rand_tensor[float32]([64, 64], float32(0)..float32(1))
+      expected = a_tensor * b_tensor
+    check squares(program.call("c", {"a": a_tensor, "b": b_tensor}) - expected).sum() < 0.1
 
 test "static_shapes":
   for (size, expect_bounds_cond) in [(1024, false), (512, false), (123, true), (8, true)]:
