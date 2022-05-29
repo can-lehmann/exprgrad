@@ -1372,6 +1372,7 @@ proc inline_static_shapes*(program: Program) =
       for loop in kernel.loops.mitems:
         loop.start.setup.inline_static_shapes(program.tensors)
         loop.stop.setup.inline_static_shapes(program.tensors)
+        loop.cache.inline_static_shapes(program.tensors)
       kernel.expr.instrs.inline_static_shapes(program.tensors)
 
 proc make_tensor_lookups*(program: Program) =
@@ -1865,6 +1866,7 @@ proc cache_tensor(read: TensorOp, kernel: Kernel, compile_target: CompileTarget)
     body.add(read_dim.instrs)
     dims.add(init_linear_index(read_dim.res))
   
+  dims.reverse()
   let index = expand_tensor_index(dims, read.tensor, kernel.regs)
   body.add(index.instrs)
   let value = kernel.regs.alloc()

@@ -148,7 +148,6 @@ proc read*[T](buffer: GpuBuffer): seq[T] =
 
 proc compile*(ctx: GpuContext, name: string, source: string): GpuKernel =
   result = GpuKernel(ctx: ctx)
-  echo source
   
   let strings = alloc_cstring_array([source])
   defer: dealloc_cstring_array(strings)
