@@ -24,4 +24,4 @@ export param, input, cache, rand, params, grad
 export backwards, optimize, backprop, reshape, target, CompileTarget, cond
 export Model, compile, call, apply, fit, emit_ir, save_llvm
 export ir.`==`, ir.hash, parser.hash
-export new_gpu_context, list_devices
+export new_gpu_context, list_devices, GpuContext
