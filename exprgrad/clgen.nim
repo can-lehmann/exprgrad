@@ -133,7 +133,10 @@ proc to_cl(instrs: seq[Instr], ctx: Context): string =
         result &= "for(" & nim_int_to_cl() & " " & iter & " = "
         result &= ctx.regs[instr.args[0]] & "; "
         result &= iter & " < " & ctx.regs[instr.args[1]] & "; "
-        result &= "++" & iter
+        case instr.loop_step:
+          of 1: result &= "++" & iter
+          of -1: result &= "--" & iter
+          else: result &= iter & " += " & $instr.loop_step
         result &= ") {\n" & body & "\n" & make_indent(ctx.indent) & "}"
         result &= " // " & $instr.loop_fuse_next
         continue
