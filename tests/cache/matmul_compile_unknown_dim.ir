@@ -1,0 +1,20 @@
+tensor1 = input(a)
+tensor2 = input(b)
+c tensor0:
+  kernel:
+    reg8 = tensor2.shape[1]
+    reg7 = tensor1.shape[1]
+    reg9 = tensor1.shape[1]
+    reg12 = tensor2.shape[1]
+    reg15 = tensor0.shape[1]
+    gpu (local reg21, group reg22, size 16) in 0 to reg8
+        (local reg26, group reg27, size 16) in 0 to 64:
+      reg3 = ((reg22 * 16) + reg21)
+      reg0 = ((reg27 * 16) + reg26)
+      if (reg3 < reg8):
+        reg10 = (reg0 * reg9)
+        reg17 = (reg3 + (reg0 * reg15))
+        loop reg1 in 0 to reg7:
+          reg2 = read[tensor1]((reg1 + reg10))
+          reg4 = read[tensor2]((reg3 + (reg1 * reg12)))
+          write[tensor0](reg17, (reg2 * reg4))

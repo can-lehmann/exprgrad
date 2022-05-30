@@ -14,9 +14,15 @@
 
 # Unit-tests for compiling exprgrad kernels to the GPU
 
-import std/[tables, sequtils]
+import std/[tables, sequtils, os, strutils]
 import exprgrad, exprgrad/[ir, irprint, model, parser]
 import ../tools/test_framework
+
+proc check_cache(name, data: string, path: string = "cache") =
+  if file_exists(path / name):
+    check read_file(path / name).strip() == data.strip()
+  else:
+    write_file(path / name, data)
 
 test "matmul/passes":
   let
@@ -49,6 +55,10 @@ test "matmul/compile/basic":
       b_tensor = new_rand_tensor[float32]([64, 64], float32(0)..float32(1))
       expected = a_tensor * b_tensor
     check squares(program.call("c", {"a": a_tensor, "b": b_tensor}) - expected).sum() < 0.1
+  else:
+    let program = to_program([c.target("c", CompileGpu)])
+    program.compile()
+    check_cache("matmul_compile_basic.ir", $program)
 
 test "matmul/compile/unknown_shape":
   let
@@ -62,6 +72,10 @@ test "matmul/compile/unknown_shape":
       b_tensor = new_rand_tensor[float32]([64, 64], float32(0)..float32(1))
       expected = a_tensor * b_tensor
     check squares(program.call("c", {"a": a_tensor, "b": b_tensor}) - expected).sum() < 0.1
+  else:
+    let program = to_program([c.target("c", CompileGpu)])
+    program.compile()
+    check_cache("matmul_compile_unknown_shape.ir", $program)
 
 test "matmul/compile/unknown_dim":
   let
@@ -75,6 +89,10 @@ test "matmul/compile/unknown_dim":
       b_tensor = new_rand_tensor[float32]([64, 64], float32(0)..float32(1))
       expected = a_tensor * b_tensor
     check squares(program.call("c", {"a": a_tensor, "b": b_tensor}) - expected).sum() < 0.1
+  else:
+    let program = to_program([c.target("c", CompileGpu)])
+    program.compile()
+    check_cache("matmul_compile_unknown_dim.ir", $program)
 
 
 test "matmul/compile/schedule/tiled16":
@@ -99,6 +117,10 @@ test "matmul/compile/schedule/tiled16":
       b_tensor = new_rand_tensor[float32]([64, 64], float32(0)..float32(1))
       expected = a_tensor * b_tensor
     check squares(program.call("c", {"a": a_tensor, "b": b_tensor}) - expected).sum() < 0.1
+  else:
+    let program = to_program([c.target("c", CompileGpu)])
+    program.compile()
+    check_cache("matmul_compile_tiled16.ir", $program)
 
 test "matmul/compile/schedule/tiled32x16/known_shapes":
   let
@@ -122,6 +144,10 @@ test "matmul/compile/schedule/tiled32x16/known_shapes":
       b_tensor = new_rand_tensor[float32]([64, 64], float32(0)..float32(1))
       expected = a_tensor * b_tensor
     check squares(program.call("c", {"a": a_tensor, "b": b_tensor}) - expected).sum() < 0.1
+  else:
+    let program = to_program([c.target("c", CompileGpu)])
+    program.compile()
+    check_cache("matmul_compile_tiled32x16_known_shapes.ir", $program)
 
 test "matmul/compile/schedule/tiled32x16/unknown_shapes":
   let
@@ -145,6 +171,10 @@ test "matmul/compile/schedule/tiled32x16/unknown_shapes":
       b_tensor = new_rand_tensor[float32]([64, 64], float32(0)..float32(1))
       expected = a_tensor * b_tensor
     check squares(program.call("c", {"a": a_tensor, "b": b_tensor}) - expected).sum() < 0.1
+  else:
+    let program = to_program([c.target("c", CompileGpu)])
+    program.compile()
+    check_cache("matmul_compile_tiled32x16_unknown_shapes.ir", $program)
 
 test "static_shapes":
   for (size, expect_bounds_cond) in [(1024, false), (512, false), (123, true), (8, true)]:

@@ -1,0 +1,14 @@
+tensor1 = input(a)
+tensor2 = input(b)
+c tensor0:
+  kernel:
+    gpu (local reg21, group reg22, size 16) in 0 to 64
+        (local reg25, group reg26, size 16) in 0 to 64:
+      reg3 = ((reg22 * 16) + reg21)
+      reg0 = ((reg26 * 16) + reg25)
+      reg10 = (reg0 * 64)
+      reg17 = (reg3 + (reg0 * 64))
+      loop reg1 in 0 to 64:
+        reg2 = read[tensor1]((reg1 + reg10))
+        reg4 = read[tensor2]((reg3 + (reg1 * 64)))
+        write[tensor0](reg17, (reg2 * reg4))

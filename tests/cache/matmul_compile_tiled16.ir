@@ -1,0 +1,30 @@
+tensor1 = input(a)
+tensor2 = input(b)
+c tensor0:
+  kernel:
+    gpu (local reg14, group reg64, size 16) in 0 to 64
+        (local reg15, group reg66, size 16) in 0 to 64:
+      reg11 = (reg64 * 16)
+      reg3 = (reg11 + reg14)
+      reg10 = (reg66 * 16)
+      reg0 = (reg10 + reg15)
+      reg12 = shared_cache[256]
+      reg18 = ((reg15 * 16) + reg14)
+      reg24 = ((reg10 + reg15) * 64)
+      reg13 = shared_cache[256]
+      reg29 = ((reg15 * 16) + reg14)
+      reg31 = (reg11 + reg14)
+      reg45 = (((reg10 * -1) + reg0) * 16)
+      reg49 = (reg3 + (reg11 * -1))
+      reg58 = (reg3 + (reg0 * 64))
+      loop reg9 in 0 to 64 step 16:
+        barrier()
+        reg26 = read[tensor1](((reg9 + reg14) + reg24))
+        cachewrite(reg12, reg18, reg26)
+        reg37 = read[tensor2]((reg31 + ((reg15 + reg9) * 64)))
+        cachewrite(reg13, reg29, reg37)
+        barrier()
+        reg38 = (reg9 * -1)
+        reg51 = (reg9 * -1)
+        loop reg1 in reg9 to (reg9 + 16):
+          write[tensor0](reg58, (arrayread[tensor1](reg12, ((reg1 + reg38) + reg45)) * arrayread[tensor2](reg13, (reg49 + ((reg1 + reg51) * 16)))))
