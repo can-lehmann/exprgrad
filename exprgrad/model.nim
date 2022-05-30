@@ -28,6 +28,7 @@ type
   
   ModelObj[T] = object
     program*: Program
+    source*: Program
     jit: Jit
     state_location: set[CompileTarget]
     cpu: CpuModel[T]
@@ -41,6 +42,37 @@ type
   Model*[T] = ref ModelObj[T]
 
 proc `$`(kernel: Kernel): string = $(kernel[])
+
+proc compile*(program: Program) =
+  program.make_tensor_lookups()
+  program.dead_code_elim()
+  program.fold_linear_indices()
+  program.deduplicate_reads()
+  program.infer_shape_constraints()
+  program.generate()
+  program.dead_kernel_elim()
+  program.infer_loop_bounds()
+  program.identify_independent()
+  program.dead_kernel_elim()
+  program.collect_tensors()
+  program.sort_shape_constraints()
+  program.infer_static_shapes()
+  program.infer_types()
+  program.reorder_loops()
+  program.choose_parallel()
+  program.fuse_loops()
+  program.tile_loops()
+  program.infer_cache_sizes()
+  program.cache_tensors()
+  program.inline_tensor_ops()
+  program.inline_static_shapes()
+  program.unfold_loop_bounds()
+  program.inline_conditions()
+  program.inline_loops()
+  program.lift_invariants()
+  program.collect_closures()
+  program.infer_types()
+  program.validate()
 
 {.push cdecl.}
 proc builtin_tensor[T](model: ModelPtr[T], id: int): ptr UncheckedArray[T] =
@@ -168,11 +200,12 @@ proc new_gpu_model[T](program: Program, ctx: GpuContext, sources: seq[GpuKernelS
   for source in sources:
     result.kernels.add(ctx.compile(source))
 
-proc new_model*[T](program: Program,
-                   params: Table[TensorId, Tensor[T]],
-                   caches: Table[TensorId, Tensor[T]],
-                   gpu_ctx: GpuContext): Model[T] =
-  result = Model[T](program: program, params: params, caches: caches)
+proc new_model[T](source: Program,
+                  program: Program,
+                  params: Table[TensorId, Tensor[T]],
+                  caches: Table[TensorId, Tensor[T]],
+                  gpu_ctx: GpuContext): Model[T] =
+  result = Model[T](source: source, program: program, params: params, caches: caches)
   result.state_location = {CompileCpu, CompileThreads}
   result.shapes = new_seq[seq[int]](program.tensors.len)
   
@@ -184,8 +217,12 @@ proc new_model*[T](program: Program,
   if not gpu_ctx.is_nil:
     result.gpu = new_gpu_model[T](program, gpu_ctx, gpu_sources)
 
-proc new_model*[T](program: Program, gpu_ctx: GpuContext): Model[T] =
+proc new_model*[T](source: Program, gpu_ctx: GpuContext): Model[T] =
   bind `==`
+  
+  let program = source.clone()
+  program.compile()
+  
   var
     params = init_table[TensorId, Tensor[T]]()
     caches = init_table[TensorId, Tensor[T]]()
@@ -199,7 +236,7 @@ proc new_model*[T](program: Program, gpu_ctx: GpuContext): Model[T] =
       of TensorCache:
         caches[tensor_id] = new_tensor[T](tensor_def.shape)
       else: discard
-  result = new_model(program, params, caches, gpu_ctx)
+  result = new_model(source, program, params, caches, gpu_ctx)
 
 template to_scalar_type(T: typedesc): ScalarType =
   when T is float32:
@@ -218,42 +255,10 @@ proc save_llvm*[T](model: Model[T], path: string) =
   bind llvmgen.save_bitcode
   save_bitcode(model.jit, path)
 
-proc compile*(program: Program) =
-  program.make_tensor_lookups()
-  program.dead_code_elim()
-  program.fold_linear_indices()
-  program.deduplicate_reads()
-  program.infer_shape_constraints()
-  program.generate()
-  program.dead_kernel_elim()
-  program.infer_loop_bounds()
-  program.identify_independent()
-  program.dead_kernel_elim()
-  program.collect_tensors()
-  program.sort_shape_constraints()
-  program.infer_static_shapes()
-  program.infer_types()
-  program.reorder_loops()
-  program.choose_parallel()
-  program.fuse_loops()
-  program.tile_loops()
-  program.infer_cache_sizes()
-  program.cache_tensors()
-  program.inline_tensor_ops()
-  program.inline_static_shapes()
-  program.unfold_loop_bounds()
-  program.inline_conditions()
-  program.inline_loops()
-  program.lift_invariants()
-  program.collect_closures()
-  program.infer_types()
-  program.validate()
-
 proc compile*[T](graphs: varargs[Fun], gpu: GpuContext = nil): Model[T] =
-  let program = graphs.to_program()
-  program.scalar_type = to_scalar_type(T)
-  program.compile()
-  result = new_model[T](program, gpu)
+  let source = graphs.to_program()
+  source.scalar_type = to_scalar_type(T)
+  result = new_model[T](source, gpu)
 
 proc alloc_shapes[T](cpu: CpuModel[T], model: Model[T], target: Target, shapes: Table[ir.TensorId, seq[int]]) =
   for tensor_id, shape in shapes.pairs:
@@ -391,11 +396,12 @@ proc apply*[T](model: Model[T],
 proc fit*[T](model: Model[T],
              target_name: string,
              args: openArray[(string, Tensor[T])],
-             batch_size: int = 32) =
+             batch_size: int = 32,
+             log_status: bool = true) =
   if args.len == 0:
     raise new_exception(ValueError, "Model.fit requires at least one input tensor. Use Model.apply instead if the target has zero inputs.")
   let
-    target = model.targets[target]
+    target = model.program.targets[target_name]
     batch_count = args[0][1].shape[0] div batch_size
   
   var input_shapes = new_seq[(TensorId, seq[int])](args.len)
@@ -409,8 +415,9 @@ proc fit*[T](model: Model[T],
   
   model.epoch += 1
   for batch_id in 0..<batch_count:
-    stdout.write($batch_id & "/" & $batch_count & "\r")
-    stdout.flush_file()
+    if log_status:
+      stdout.write($batch_id & "/" & $batch_count & "\r")
+      stdout.flush_file()
     let offset = batch_size * batch_id
     for it, (name, arg) in args:
       model.write_input(target.compile_target, name, arg.view_first(offset, batch_size))
@@ -421,6 +428,7 @@ proc fit*[T](model: Model[T],
       if model.program.tensors[tensor].kind == TensorResult:
         model.zero_result_tensor(target.compile_target, tensor)
   
-  stdout.write($batch_count & "/" & $batch_count & "\r")
-  stdout.write("\n")
-  stdout.flush_file()
+  if log_status:
+    stdout.write($batch_count & "/" & $batch_count & "\r")
+    stdout.write("\n")
+    stdout.flush_file()

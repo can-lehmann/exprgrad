@@ -15,7 +15,7 @@
 # Render programs as DOT graphs 
 
 import std/[tables, sets, strutils]
-import ../ir
+import ../ir, ../irprint
 
 type
   Node = object
@@ -60,10 +60,33 @@ proc `$`(graph: DotGraph): string =
   result &= "\n}"
 
 proc to_dot_graph*(program: Program, target: string): string =
+  program.assert_gen("to_dot_graph", requires={})
+  
   var
     graph = DotGraph()
     deps = init_table[TensorId, HashSet[TensorId]]()
-  for tensor in program.targets[target].tensors:
+    tensors = init_hash_set[TensorId]()
+  
+  for kernel in program.targets[target].kernels:
+    var
+      inputs = init_hash_set[TensorId]()
+      outputs = init_hash_set[TensorId]()
+    for read in kernel.reads:
+      inputs.incl(read.tensor)
+    if kernel.write.tensor != TensorId(0):
+      outputs.incl(kernel.write.tensor)
+    if kernel.generator.kind == GenReshape:
+      inputs.incl(kernel.generator.tensor)
+    
+    for outp in outputs:
+      if outp notin deps:
+        deps[outp] = init_hash_set[TensorId]()
+      for inp in inputs:
+        deps[outp].incl(inp)
+    tensors.incl(inputs)
+    tensors.incl(outputs)
+  
+  for tensor in tensors:
     let def = program.tensors[tensor]
     var label = def.name
     if label.len == 0:
@@ -76,25 +99,6 @@ proc to_dot_graph*(program: Program, target: string): string =
       "label": label,
       "shape": "box"
     }))
-    deps[tensor] = init_hash_set[TensorId]()
-  
-  for kernel in program.targets[target].kernels:
-    var
-      inputs = init_hash_set[TensorId]()
-      outputs = init_hash_set[TensorId]()
-    for read in kernel.reads:
-      inputs.incl(read.tensor)
-    if kernel.write.tensor != TensorId(0):
-      outputs.incl(kernel.write.tensor)
-    for instr in kernel.expr.instrs:
-      case instr.kind:
-        of InstrRead: inputs.incl(instr.tensor)
-        of InstrWrite: outputs.incl(instr.tensor)
-        else: discard
-    
-    for outp in outputs:
-      for inp in inputs:
-        deps[outp].incl(inp)
   
   for output, inputs in deps:
     for input in inputs:

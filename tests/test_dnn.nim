@@ -47,3 +47,32 @@ test "xor":
   check internal_loss < 0.1
   check loss < 0.1
   check abs(loss / float64(train_y.len) - internal_loss) < 0.0001
+
+test "xor/fit":
+  let net = input("x")
+    .dense(2, 4)
+    .leaky_relu()
+    .dense(4, 1)
+    .sigmoid()
+    .target("predict")
+    .mse(input("y"))
+    .target("loss")
+    .backprop(gradient_descent.make_opt(rate=0.2))
+    .target("train")
+  
+  let
+    model = compile[float32](net)
+    train_x = new_tensor([4, 2], @[float32 0, 0, 0, 1, 1, 0, 1, 1])
+    train_y = new_tensor([4, 1], @[float32 0, 1, 1, 0])
+  
+  for it in 0..<2000:
+    model.fit("train", {"x": train_x, "y": train_y}, batch_size=4, log_status=false)
+  
+  let
+    internal_loss = model.call("loss", {"x": train_x, "y": train_y}).sum()
+    loss = squares(model.call("predict", {"x": train_x}) - train_y).sum()
+  
+  check internal_loss < 0.1
+  check loss < 0.1
+  check abs(loss / float64(train_y.len) - internal_loss) < 0.0001
+

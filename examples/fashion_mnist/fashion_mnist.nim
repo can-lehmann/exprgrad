@@ -51,7 +51,7 @@ let
   model = compile[float32](net)
   #model = load_model[float32]("model.bin")
 
-write_file("model.gv", model.program.to_dot_graph("loss"))
+write_file("model.gv", model.source.to_dot_graph("loss"))
 
 echo test_x.shape
 echo test_y.shape

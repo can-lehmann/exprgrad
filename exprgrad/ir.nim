@@ -413,11 +413,36 @@ proc clone*(kernel: Kernel): Kernel =
     generator: kernel.generator,
     grad: kernel.grad.clone(),
     regs: kernel.regs,
+    setup: kernel.setup,
     loops: kernel.loops,
+    conds: kernel.conds,
     reads: kernel.reads,
     expr: kernel.expr,
     write: kernel.write
   )
+
+proc clone*(target: Target): Target =
+  result = Target(
+    name: target.name,
+    output: target.output,
+    tensors: target.tensors,
+    shapes: target.shapes,
+    compile_target: target.compile_target
+  )
+  for kernel in target.kernels:
+    result.kernels.add(kernel.clone())
+
+proc clone*(program: Program): Program =
+  result = Program(
+    tensors: program.tensors,
+    inputs: program.inputs,
+    params: program.params,
+    caches: program.caches,
+    stages: program.stages,
+    scalar_type: program.scalar_type
+  )
+  for name, target in program.targets:
+    result.targets[name] = target.clone()
 
 proc substitute*(instrs: var seq[Instr], subs: Table[TensorId, TensorId]) =
   for instr in instrs.mitems:

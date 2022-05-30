@@ -221,6 +221,7 @@ proc stringify(target: Target, level: int): string =
   for it, kernel in target.kernels:
     result &= "\n" & kernel.stringify(level + 1)
 
+proc `$`*(kernel: Kernel): string = result = kernel.stringify(0)
 proc `$`*(target: Target): string = result = target.stringify(0)
 
 proc `$`*(program: Program): string =

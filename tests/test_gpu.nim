@@ -18,11 +18,20 @@ import std/[tables, sequtils, os, strutils]
 import exprgrad, exprgrad/[ir, irprint, model, parser]
 import ../tools/test_framework
 
-proc check_cache(name, data: string, path: string = "cache") =
-  if file_exists(path / name):
-    check read_file(path / name).strip() == data.strip()
+proc check_cache(name, data: string, search_paths: openArray[string] = ["cache", "tests/cache"]) =
+  let base_path = block:
+    var base_path = ""
+    for path in search_paths:
+      if dir_exists(path):
+        base_path = path
+        break
+    base_path
+  
+  let path = base_path / name
+  if file_exists(path):
+    check read_file(path).strip() == data.strip()
   else:
-    write_file(path / name, data)
+    write_file(path, data)
 
 test "matmul/passes":
   let
