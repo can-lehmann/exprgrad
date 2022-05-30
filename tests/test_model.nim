@@ -15,7 +15,7 @@
 # Unit-tests for exprgrad
 
 import std/random
-import exprgrad
+import exprgrad, exprgrad/irprint
 import ../tools/test_framework
 
 test "matmul":
@@ -71,6 +71,45 @@ test "max":
     "x": new_tensor([3, 2], @[float32 1, 0, 3, 4, -10, 6]),
     "y": new_tensor([3, 2], @[float32 1, 2, -3, 2, 5, 5.5])
   }) == new_tensor([3, 2], @[float32 1, 2, 3, 4, 5, 6])
+
+test "conv1":
+  res*[x] ++= input("image")[x + dx] * input("filter")[dx] | (x, dx)
+  let model = compile[float32](res.target("res"))
+  check model.call("res", {
+    "image": new_tensor([7], @[float32 1, 2, 3, 2, 1, 0, -1]),
+    "filter": new_tensor([3], @[float32 1, 2, 3])
+  }) == new_tensor([5], @[float32 14, 14, 10, 4, -2])
+
+test "blur":
+  res*[x] ++= (
+    let image = input("image");
+    (image[x] + image[x + 1] + image[x + 2]) / 3.0
+  ) | (x in 0..<res.shape[0]) # TODO: Infer loop bounds
+  let model = compile[float32](res.target("res"))
+  check model.call("res", {
+    "image": new_tensor([7], @[float32 1, 2, 3, 2, 1, 0, -1]),
+  }) == new_tensor([5], @[float32 2, float32(7/3), 2, 1, 0])
+
+test "blur_center":
+  let image = input("image")
+  res*[x - 1] ++= (
+    (image[x - 1] + image[x] + image[x + 1]) / 3.0
+  ) | (x in 1..<(image.shape[0] - 1)) # TODO: Infer loop bounds
+  let model = compile[float32](res.target("res"))
+  check model.call("res", {
+    "image": new_tensor([7], @[float32 1, 2, 3, 2, 1, 0, -1]),
+  }) == new_tensor([5], @[float32 2, float32(7/3), 2, 1, 0])
+
+test "blur_offset":
+  let image = input("image")
+  res*[x + 1] ++= (
+    (image[x] + image[x + 1] + image[x + 2]) / 3.0
+  ) | (x in 0..<(image.shape[0] - 2)) # TODO: Infer loop bounds
+  res.with_shape([image.shape[0]])
+  let model = compile[float32](res.target("res"))
+  check model.call("res", {
+    "image": new_tensor([7], @[float32 1, 2, 3, 2, 1, 0, -1]),
+  }) == new_tensor([7], @[float32 0, 2, float32(7/3), 2, 1, 0, 0])
 
 test "shape":
   let inp = input("x")
@@ -185,4 +224,12 @@ test "nested_array":
   
   let model = compile[float32](res.target("y"))
   check model.call("y", []) == new_tensor([3, 3], @[float32 1, 2, 3, 4, 5, 6, 7, 8, 9])
+
+test "loop_bounds":
+  res*[x] ++= 1.0 | (x in 2..<4)
+  res[x] ++= -1.0 | (x in 0..<1)
+  res[x] ++= -2.0 | (x in 1..<1)
+  res.with_shape(5)
+  let model = compile[float32](res.target("res"))
+  check model.call("res") == new_tensor([5], @[float32 -1, 0, 1, 1, 0])
 

@@ -118,8 +118,12 @@ proc literal*[T](arr: openArray[T]): auto =
     builder.children.add(ExprBuilder(literal(value)))
   result = Array[typeof(literal(arr[0]))](builder)
 
-proc iterator_literal*(name: string): Index =
-  result = Index(ExprBuilder(kind: ExprIter, iter: name.nim_ident_normalize()))
+proc iterator_literal*(name: string, start: Index = nil, stop: Index = nil): Index =
+  result = Index(ExprBuilder(kind: ExprIter,
+    iter: name.nim_ident_normalize()
+  ))
+  if not ExprBuilder(start).is_nil or not ExprBuilder(stop).is_nil:
+    ExprBuilder(result).children = @[ExprBuilder(start), ExprBuilder(stop)]
 
 type BuildContext = object
   kernel: Kernel
@@ -180,10 +184,15 @@ proc build*(builder: ExprBuilder,
         if builder.iter notin ctx.iters:
           let reg = ctx.kernel.regs.alloc()
           ctx.iters[builder.iter] = reg
-          var schedule = DEFAULT_LOOP_SCHEDULE
+          var loop = Loop(iter: reg, schedule: DEFAULT_LOOP_SCHEDULE)
           if builder.iter in ctx.schedule.loops:
-            schedule = ctx.schedule.loops[builder.iter]
-          ctx.kernel.loops.add(Loop(iter: reg, schedule: schedule))
+            loop.schedule = ctx.schedule.loops[builder.iter]
+          if builder.children.len > 0:
+            loop.has_bounds = true
+            loop.start = builder.children[0].build_linear_index(ctx)
+            loop.stop = builder.children[1].build_linear_index(ctx)
+            loop.step = 1
+          ctx.kernel.loops.add(loop)
         builder.res[block_id] = ctx.iters[builder.iter]
       of ExprInstr:
         var instr = Instr(kind: builder.instr)
@@ -582,25 +591,41 @@ proc new_lit(schedule: ScheduleDef): NimNode =
   result.add(name)
   result = new_tree(nnkBlockStmt, new_empty_node(), result)
 
+type Iterator = object
+  name: string
+  start: NimNode
+  stop: NimNode
+
+proc parse_iterators(node: NimNode): seq[Iterator] = 
+  case node.kind:
+    of nnkSym, nnkIdent:
+      result.add(Iterator(name: node.str_val))
+    of nnkPar, nnkTupleConstr:
+      for child in node:
+        result.add(child.parse_iterators())
+    of nnkInfix:
+      if not node[0].eq_ident("in") or not node[1].is_name():
+        raise ParserError()
+      if not node[2][0].eq_ident("..<"):
+        raise ParserError(msg: node[2][1].repr & " is not a valid iterator")
+      result.add(Iterator(
+        name: node[1].str_val,
+        start: node[2][1],
+        stop: node[2][2]
+      ))
+    else:
+      raise ParserError(msg: node.repr & " is not a valid iterator")
+
 proc gen_kernel_builder(target: TargetInfo, value_node: NimNode, attrs: KernelAttrs): NimNode =
   var dims: seq[NimNode] = @[]
   for dim in target.dims:
     dims.add(new_call(bind_sym("literal"), dim))
   var
     value = value_node
-    iters: seq[string] = @[]
+    iters: seq[Iterator] = @[]
   if value.kind == nnkInfix and value[0].is_name("|"):
     value = value[1]
-    let iters_node = value_node[2]
-    case iters_node.kind:
-      of nnkSym, nnkIdent:
-        iters.add(iters_node.str_val)
-      of nnkPar, nnkTupleConstr:
-        for child in iters_node:
-          assert child.is_name
-          iters.add(child.str_val)
-      else:
-        raise ParserError(msg: iters_node.repr & " is not a valid iterator")
+    iters = value_node[2].parse_iterators()
   var fields = @{
     "target": target.tensor,
     "dims": new_call(bind_sym("@"), new_tree(nnkBracket, dims)),
@@ -613,9 +638,12 @@ proc gen_kernel_builder(target: TargetInfo, value_node: NimNode, attrs: KernelAt
     fields.add(("grads", new_call(bind_sym("@"), new_tree(nnkBracket, attrs.custom_grad))))
   result = new_nim_node(nnkStmtListExpr)
   for iter in iters:
-    result.add(new_let_stmt(ident(iter),
-      new_call(bind_sym("iterator_literal"), new_lit(iter))
-    ))
+    let call = new_call(bind_sym("iterator_literal"), new_lit(iter.name))
+    if not iter.start.is_nil:
+      call.add(new_tree(nnkExprEqExpr, ident("start"), iter.start))
+    if not iter.stop.is_nil:
+      call.add(new_tree(nnkExprEqExpr, ident("stop"), iter.stop))
+    result.add(new_let_stmt(ident(iter.name), call))
   result.add(new_obj_constr(bind_sym("KernelBuilder"), fields))
   result = new_tree(nnkBlockStmt, new_empty_node(), result)
 
