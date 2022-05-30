@@ -48,6 +48,8 @@ test "xor":
   check loss < 0.1
   check abs(loss / float64(train_y.len) - internal_loss) < 0.0001
 
+randomize(10)
+
 test "xor/fit":
   let net = input("x")
     .dense(2, 4)
