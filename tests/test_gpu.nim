@@ -52,7 +52,7 @@ test "matmul/passes":
   program.compile()
   echo program.targets["c"]
 
-test "matmul/compile/basic":
+test "matmul/basic":
   let
     a = input("a", [64, 64])
     b = input("b", [64, 64])
@@ -67,9 +67,9 @@ test "matmul/compile/basic":
   else:
     let program = to_program([c.target("c", CompileGpu)])
     program.compile()
-    check_cache("matmul_compile_basic.ir", $program)
+    check_cache("matmul_basic.ir", $program)
 
-test "matmul/compile/unknown_shape":
+test "matmul/unknown_shape":
   let
     a = input("a")
     b = input("b")
@@ -84,9 +84,9 @@ test "matmul/compile/unknown_shape":
   else:
     let program = to_program([c.target("c", CompileGpu)])
     program.compile()
-    check_cache("matmul_compile_unknown_shape.ir", $program)
+    check_cache("matmul_unknown_shape.ir", $program)
 
-test "matmul/compile/unknown_dim":
+test "matmul/unknown_dim":
   let
     a = input("a", [64, -1])
     b = input("b")
@@ -101,10 +101,10 @@ test "matmul/compile/unknown_dim":
   else:
     let program = to_program([c.target("c", CompileGpu)])
     program.compile()
-    check_cache("matmul_compile_unknown_dim.ir", $program)
+    check_cache("matmul_unknown_dim.ir", $program)
 
 
-test "matmul/compile/schedule/tiled16":
+test "matmul/schedule/tiled16":
   let
     a = input("a", [64, 64])
     b = input("b", [64, 64])
@@ -129,9 +129,9 @@ test "matmul/compile/schedule/tiled16":
   else:
     let program = to_program([c.target("c", CompileGpu)])
     program.compile()
-    check_cache("matmul_compile_tiled16.ir", $program)
+    check_cache("matmul_schedule_tiled16.ir", $program)
 
-test "matmul/compile/schedule/tiled32x16/known_shapes":
+test "matmul/schedule/tiled32x16/known_shapes":
   let
     a = input("a", [64, 64])
     b = input("b", [64, 64])
@@ -156,9 +156,9 @@ test "matmul/compile/schedule/tiled32x16/known_shapes":
   else:
     let program = to_program([c.target("c", CompileGpu)])
     program.compile()
-    check_cache("matmul_compile_tiled32x16_known_shapes.ir", $program)
+    check_cache("matmul_schedule_tiled32x16_known_shapes.ir", $program)
 
-test "matmul/compile/schedule/tiled32x16/unknown_shapes":
+test "matmul/schedule/tiled32x16/unknown_shapes":
   let
     a = input("a")
     b = input("b")
@@ -183,7 +183,55 @@ test "matmul/compile/schedule/tiled32x16/unknown_shapes":
   else:
     let program = to_program([c.target("c", CompileGpu)])
     program.compile()
-    check_cache("matmul_compile_tiled32x16_unknown_shapes.ir", $program)
+    check_cache("matmul_schedule_tiled32x16_unknown_shapes.ir", $program)
+
+proc conv1[T](image, filter: Tensor[T]): Tensor[T] =
+  result = new_tensor[T]([image.shape[0] - filter.shape[0] + 1])
+  for x in 0..<result.shape[0]:
+    for dx in 0..<filter.shape[0]:
+      result[x] += image[x + dx] * filter[dx]
+
+test "conv1/basic":
+  let
+    image = input("image", [68])
+    filter = input("filter", [5])
+  res*[x] ++= image[x + dx] * filter[dx] | (x, dx)
+  when TARGET_SUPPORTS_GPU:
+    let
+      program = compile[float32](res.target("res", CompileGpu), gpu=new_gpu_context())
+      image_tensor = new_rand_tensor[float32]([68], float32(0)..float32(1))
+      filter_tensor = new_rand_tensor[float32]([5], float32(-1)..float32(1))
+      res_tensor = program.call("res", {"image": image_tensor, "filter": filter_tensor})
+      expected = conv1(image_tensor, filter_tensor)
+    check squares(res_tensor - expected).sum() < 0.1
+  else:
+    let program = to_program([res.target("res", CompileGpu)])
+    program.compile()
+    check_cache("conv1_basic.ir", $program)
+
+test "conv1/schedule/tiled16":
+  let
+    image = input("image", [68])
+    filter = input("filter", [5])
+  res*[x] ++= image[x + dx] * filter[dx] | (x, dx) do:
+    schedule:
+      parallel(x)
+      gpu:
+        tile_size(x, 16)
+        share_cache(dx)
+        cache(image)
+  when TARGET_SUPPORTS_GPU:
+    let
+      program = compile[float32](res.target("res", CompileGpu), gpu=new_gpu_context())
+      image_tensor = new_rand_tensor[float32]([68], float32(0)..float32(1))
+      filter_tensor = new_rand_tensor[float32]([5], float32(-1)..float32(1))
+      res_tensor = program.call("res", {"image": image_tensor, "filter": filter_tensor})
+      expected = conv1(image_tensor, filter_tensor)
+    check squares(res_tensor - expected).sum() < 0.1
+  else:
+    let program = to_program([res.target("res", CompileGpu)])
+    program.compile()
+    check_cache("conv1_schedule_tiled16.ir", $program)
 
 test "static_shapes":
   for (size, expect_bounds_cond) in [(1024, false), (512, false), (123, true), (8, true)]:

@@ -14,7 +14,7 @@
 
 # Compiler passes for exprgrad's compiler
 
-import std/[tables, algorithm, sets, math, rationals, sequtils, strutils]
+import std/[tables, algorithm, sets, math, rationals, sequtils, strutils, sugar]
 import ir, irprint
 
 proc infer_types(instrs: seq[Instr], regs: var seq[Register]) =
@@ -819,8 +819,14 @@ proc inline_tensor_ops(kernel: Kernel, has_written: var seq[bool]) =
         else:
           InstrWrite
     
+    let tensor =
+      if instr_kind == InstrArrayRead:
+        TensorId(0)
+      else:
+        tensor_op.tensor
+    
     instrs[kind].add(Instr(kind: instr_kind,
-      tensor: tensor_op.tensor,
+      tensor: tensor,
       args: args,
       res: res
     ))
@@ -1170,9 +1176,13 @@ proc solve(equations: seq[LinearIndex]): Table[RegId, Fraction] =
   for reg, index in indices:
     result[reg] = solutions[index]
 
+type EvalResult* = enum
+  EvalSuccess, EvalDynamicReg, EvalDynamicShape, EvalInvalidInstruction
+
 proc eval*(instrs: seq[Instr],
            shapes: Table[TensorId, seq[int]],
-           regs: var Table[RegId, int]): bool =
+           regs: var Table[RegId, int]): EvalResult =
+  result = EvalSuccess
   for instr in instrs:
     var can_eval = true
     for arg in instr.args:
@@ -1181,34 +1191,41 @@ proc eval*(instrs: seq[Instr],
         break
     if can_eval and instr.tensor != TensorId(0):
       can_eval = instr.tensor in shapes
-    if can_eval:
-      case instr.kind:
-        of InstrShape:
-          var size = -1
-          let shape = shapes[instr.tensor]
+    if not can_eval:
+      return EvalDynamicReg
+    case instr.kind:
+      of InstrShape:
+        let shape = shapes[instr.tensor]
+        if shape.len == 0:
+          return EvalDynamicShape
+        let size =
           if instr.dim < 0:
-            size = shape[shape.len + instr.dim]
+            shape[shape.len + instr.dim]
           else:
-            size = shape[instr.dim]
-          regs[instr.res] = size
-          if size < 0:
-            result = true
-        of InstrLen: regs[instr.res] = shapes[instr.tensor].prod()
-        of InstrShapeLen: regs[instr.res] = shapes[instr.tensor].len
-        of InstrIndex: regs[instr.res] = instr.index_lit
-        of InstrAdd: regs[instr.res] = regs[instr.args[0]] + regs[instr.args[1]]
-        of InstrSub: regs[instr.res] = regs[instr.args[0]] - regs[instr.args[1]]
-        of InstrMul: regs[instr.res] = regs[instr.args[0]] * regs[instr.args[1]]
-        of InstrIndexDiv: regs[instr.res] = regs[instr.args[0]] div regs[instr.args[1]]
-        of InstrMod: regs[instr.res] = regs[instr.args[0]] mod regs[instr.args[1]]
-        of InstrWrap:
-          regs[instr.res] = regs[instr.args[0]] mod regs[instr.args[1]]
-          if regs[instr.res] < 0:
-            regs[instr.res] += regs[instr.args[1]]
-        of InstrNegate: regs[instr.res] = -regs[instr.args[0]]
-        else: raise ShapeError(msg: $instr.kind & " is not allowed in tensor shape definition")
-    else:
-      result = true
+            shape[instr.dim]
+        if size < 0:
+          return EvalDynamicShape
+        regs[instr.res] = size
+      of InstrLen:
+        if shapes[instr.tensor].len == 0 or shapes[instr.tensor].any_it(it < 0):
+          return EvalDynamicShape
+        regs[instr.res] = shapes[instr.tensor].prod()
+      of InstrShapeLen:
+        regs[instr.res] = shapes[instr.tensor].len
+        if regs[instr.res] < 0:
+          return EvalDynamicShape
+      of InstrIndex: regs[instr.res] = instr.index_lit
+      of InstrAdd: regs[instr.res] = regs[instr.args[0]] + regs[instr.args[1]]
+      of InstrSub: regs[instr.res] = regs[instr.args[0]] - regs[instr.args[1]]
+      of InstrMul: regs[instr.res] = regs[instr.args[0]] * regs[instr.args[1]]
+      of InstrIndexDiv: regs[instr.res] = regs[instr.args[0]] div regs[instr.args[1]]
+      of InstrMod: regs[instr.res] = regs[instr.args[0]] mod regs[instr.args[1]]
+      of InstrWrap:
+        regs[instr.res] = regs[instr.args[0]] mod regs[instr.args[1]]
+        if regs[instr.res] < 0:
+          regs[instr.res] += regs[instr.args[1]]
+      of InstrNegate: regs[instr.res] = -regs[instr.args[0]]
+      else: return EvalInvalidInstruction
 
 proc matches(static_shape, shape: seq[int]): bool =
   if static_shape.len == 0:
@@ -1238,8 +1255,11 @@ proc infer_shapes*(program: Program,
         var sizes = new_seq[int](shape.dims.len)
         for dim, index in shape.dims:
           var regs = init_table[RegId, int]()
-          if index.setup.eval(result, regs):
-            raise ShapeError(msg: "Unable to evaluate all instructions. Maybe you forgot to pass a required input tensor.")
+          case index.setup.eval(result, regs):
+            of EvalSuccess: discard
+            of EvalDynamicShape: raise ShapeError(msg: "Not all shapes are known. Maybe you forgot to pass a required input tensor.")
+            of EvalInvalidInstruction: raise ShapeError(msg: "Invalid instruction in tensor shape")
+            of EvalDynamicReg: raise ShapeError(msg: "Unable to evaluate all instructions.")
           sizes[dim] = index.eval(regs)
         result[shape.dest] = sizes
       of ShapeCopy:
@@ -1262,6 +1282,12 @@ proc infer_shapes*(program: Program,
         for dim, index in shape.write:
           result[shape.dest][dim] = index.eval(max_values) + 1
 
+proc static_shape_table(tensors: seq[TensorDef]): Table[TensorId, seq[int]] =
+  for it, tensor in tensors:
+    let id = TensorId(it + 1)
+    if tensor.shape.len > 0:
+      result[id] = tensor.shape
+
 proc infer_static_shapes*(program: Program) =
   program.assert_pass("infer_static_shapes",
     requires={StageSortedShapes},
@@ -1269,12 +1295,7 @@ proc infer_static_shapes*(program: Program) =
     preserves=ALL_STAGES
   )
   
-  var shapes = init_table[TensorId, seq[int]]()
-  for it, tensor in program.tensors:
-    let id = TensorId(it + 1)
-    if tensor.shape.len > 0:
-      shapes[id] = tensor.shape
-  
+  var shapes = program.tensors.static_shape_table()
   for name, target in program.targets:
     for shape in target.shapes:
       var dims: seq[int] = @[]
@@ -1284,10 +1305,10 @@ proc infer_static_shapes*(program: Program) =
           dims = new_seq[int](shape.dims.len)
           for dim, size in shape.dims:
             var regs = init_table[RegId, int]()
-            if size.setup.eval(shapes, regs):
-              dims[dim] = -1
-            else:
+            if size.setup.eval(shapes, regs) == EvalSuccess:
               dims[dim] = size.eval(regs)
+            else:
+              dims[dim] = -1
         of ShapeLinear:
           var equations: seq[LinearIndex] = @[]
           for tensor, dims in shape.reads:
@@ -1669,7 +1690,7 @@ proc tile_loops(kernel: Kernel) =
           start: loop.start,
           stop: loop.stop,
           step: loop.schedule.tile_size,
-          schedule: loop.schedule
+          schedule: loop.schedule.dup(_.tile = false)
         )
         inner = Loop(
           iter: loop.iter,
@@ -1683,7 +1704,7 @@ proc tile_loops(kernel: Kernel) =
             constant: loop.schedule.tile_size
           ),
           step: 1,
-          schedule: DEFAULT_LOOP_SCHEDULE
+          schedule: DEFAULT_LOOP_SCHEDULE.dup(_.share_cache = true)
         )
       kernel.loops.delete(it)
       kernel.loops.insert([outer, inner], it)
@@ -1705,12 +1726,13 @@ proc tile_loops*(program: Program) =
     for kernel in target.kernels:
       kernel.tile_loops()
 
-proc bounds_size(loop: Loop): int =
+proc bounds_size(loop: Loop, shapes: Table[TensorId, seq[int]]): (bool, int) =
   let size = loop.stop - loop.start
-  if size.factors.len > 0:
-    result = -1
+  var regs = init_table[RegId, int]()
+  if size.setup.eval(shapes, regs) == EvalSuccess:
+    result = (true, size.eval(regs))
   else:
-    result = size.constant
+    result = (false, 0)
 
 proc eval(index: LinearIndex, regs: Table[RegId, OffsetInterval]): OffsetInterval =
   result.interval.min += index.constant
@@ -1722,12 +1744,21 @@ proc eval(index: LinearIndex, regs: Table[RegId, OffsetInterval]): OffsetInterva
     else:
       result.offset = result.offset + LinearIndex(factors: to_table({reg: factor}))
 
-proc infer_cache_sizes(kernel: Kernel, compile_target: CompileTarget) =
+proc infer_cache_sizes(kernel: Kernel,
+                       compile_target: CompileTarget,
+                       shapes: Table[TensorId, seq[int]]) =
   if kernel.reads.any_it(it.schedule.cache):
-    var cache_level = kernel.loops.len
-    while cache_level > 0 and
-          kernel.loops[cache_level - 1].mode < LoopParallel and
-          kernel.loops[cache_level - 1].bounds_size >= 0:
+    var
+      cache_level = kernel.loops.len
+      sizes: seq[int] = @[]
+    while cache_level > 0:
+      let loop = kernel.loops[cache_level - 1]
+      if loop.mode >= LoopParallel or not loop.schedule.share_cache:
+        break
+      let (is_static, size) = loop.bounds_size(shapes)
+      if not is_static:
+        break
+      sizes.add(size)
       cache_level -= 1
     
     var regs = init_table[RegId, OffsetInterval]()
@@ -1735,7 +1766,7 @@ proc infer_cache_sizes(kernel: Kernel, compile_target: CompileTarget) =
       let loop = kernel.loops[it]
       regs[loop.iter] = OffsetInterval(
         offset: loop.start,
-        interval: Interval(min: 0, max: loop.bounds_size - 1)
+        interval: Interval(min: 0, max: sizes[kernel.loops.len - it - 1] - 1)
       )
     if compile_target == CompileGpu:
       for it in 0..<cache_level:
@@ -1749,17 +1780,17 @@ proc infer_cache_sizes(kernel: Kernel, compile_target: CompileTarget) =
           )
     
     for read in kernel.reads.mitems:
-      if read.is_raw:
-        continue # TODO: Support raw reads
-      var cache = LocalCache(
-        exists: true,
-        level: cache_level,
-        reg: kernel.regs.alloc()
-      )
       if read.schedule.cache:
+        if read.is_raw:
+          continue # TODO: Support raw reads
+        var cache = LocalCache(
+          exists: true,
+          level: cache_level,
+          reg: kernel.regs.alloc()
+        )
         for dim in read.dims:
           cache.dims.add(dim.eval(regs))
-      read.cache = cache
+        read.cache = cache
 
 proc infer_cache_sizes*(program: Program) =
   program.assert_pass("infer_cache_sizes",
@@ -1771,9 +1802,10 @@ proc infer_cache_sizes*(program: Program) =
     }
   )
   
+  let shapes = program.tensors.static_shape_table()
   for name, target in program.targets:
     for kernel in target.kernels:
-      kernel.infer_cache_sizes(target.compile_target)
+      kernel.infer_cache_sizes(target.compile_target, shapes)
 
 proc cache_tensor(read: TensorOp, kernel: Kernel, compile_target: CompileTarget): seq[Instr] =
   type CacheSize = enum

@@ -168,7 +168,20 @@ proc stringify(index: LinearIndex, regs: var seq[string]): string =
   for reg, factor in index.factors:
     if result.len != 0:
       result &= " + "
-    result &= $factor & " * " & regs[reg]
+    if factor == 1:
+      result &= regs[reg]
+    else:
+      result &= $factor & " * " & regs[reg]
+  if result.len == 0:
+    result = "0"
+
+proc stringify(cache: LocalCache, regs: var seq[string]): string =
+  result = "cache " & regs[cache.reg] & " region "
+  for it, dim in cache.dims:
+    if it != 0:
+      result &= ", "
+    result &= dim.offset.stringify(regs)
+    result &= " + [" & $dim.interval.min & ", " & $dim.interval.max & "]"
 
 proc stringify(op: TensorOp, kind: TensorOpKind, regs: var seq[string], level: int): string =
   result &= make_indent(level)
@@ -186,6 +199,8 @@ proc stringify(op: TensorOp, kind: TensorOpKind, regs: var seq[string], level: i
     result &= "[" & dims & "]"
   if kind == OpWrite:
     result &= " += " & regs[op.data]
+  if op.cache.exists:
+    result &= " " & op.cache.stringify(regs)
 
 proc stringify(kernel: Kernel, level: int): string =
   var regs = new_seq[string](kernel.regs.len)
@@ -208,6 +223,8 @@ proc stringify(kernel: Kernel, level: int): string =
           result &= " in " & loop.start.stringify(regs) & " to " & loop.stop.stringify(regs)
           if loop.step != 1:
             result &= " step " & $loop.step
+        if loop.schedule.tile:
+          result &= " tile " & $loop.schedule.tile_size
     result &= ":"
     for read in kernel.reads:
       result &= "\n" & read.stringify(OpRead, regs, level + 2)

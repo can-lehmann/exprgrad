@@ -539,6 +539,9 @@ proc parse_schedules(node: NimNode,
             let arg = child[it]
             assert arg.is_name
             schedule.lookup_loop(arg.str_val).parallel = true
+      of "sharecache":
+        property:
+          schedule.lookup_loop(child[1].str_val).share_cache = true
       else:
         raise ParserError(msg: "Unknown schedule property " & $name)
 

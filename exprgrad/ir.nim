@@ -130,6 +130,7 @@ type
     tile_size*: int
     tile*: bool
     parallel*: bool
+    share_cache*: bool
   
   Loop* = object
     iter*: RegId
