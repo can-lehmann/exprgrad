@@ -1,0 +1,10 @@
+tensor1 = input(image)
+tensor2 = input(filter)
+res tensor0:
+  kernel:
+    gpu (local reg11, group reg12, size 16) in 0 to 64:
+      reg0 = ((reg12 * 16) + reg11)
+      loop reg1 in 0 to 5:
+        reg3 = read[tensor1]((reg1 + reg0))
+        reg4 = read[tensor2](reg1)
+        write[tensor0](reg0, (reg3 * reg4))

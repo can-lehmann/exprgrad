@@ -1,0 +1,17 @@
+tensor1 = input(image)
+tensor2 = input(filter)
+res tensor0:
+  kernel:
+    gpu (local reg10, group reg22, size 16) in 0 to 64:
+      reg8 = (reg22 * 16)
+      reg0 = (reg8 + reg10)
+      barrier()
+      reg9 = shared_cache[20]
+      loop reg11 in reg10 to 20 step 16:
+        reg14 = read[tensor1]((reg8 + reg11))
+        cachewrite(reg9, reg11, reg14)
+      barrier()
+      reg16 = (reg8 * -1)
+      loop reg1 in 0 to 5:
+        reg4 = read[tensor2](reg1)
+        write[tensor0](reg0, (arrayread(reg9, ((reg16 + reg1) + reg0)) * reg4))

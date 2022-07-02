@@ -27,4 +27,4 @@ c tensor0:
         reg38 = (reg9 * -1)
         reg51 = (reg9 * -1)
         loop reg1 in reg9 to (reg9 + 16):
-          write[tensor0](reg58, (arrayread[tensor1](reg12, ((reg1 + reg38) + reg45)) * arrayread[tensor2](reg13, (reg49 + ((reg1 + reg51) * 16)))))
+          write[tensor0](reg58, (arrayread(reg12, ((reg1 + reg38) + reg45)) * arrayread(reg13, (reg49 + ((reg1 + reg51) * 16)))))
