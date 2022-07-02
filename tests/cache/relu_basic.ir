@@ -1,0 +1,9 @@
+tensor1 = input(x)
+y tensor0:
+  kernel:
+    reg9 = len[tensor1]()
+    gpu (local reg11, group reg12, size 16) in 0 to reg9:
+      reg1 = ((reg12 * 16) + reg11)
+      if (reg1 < reg9):
+        reg2 = read[tensor1](reg1)
+        overwrite[tensor0](reg1, select((0.0 < reg2), reg2, (0.01 * reg2)))

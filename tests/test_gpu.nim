@@ -33,6 +33,8 @@ proc check_cache(name, data: string, search_paths: openArray[string] = ["cache",
   else:
     write_file(path, data)
 
+proc mse[T](a, b: Tensor[T]): T = squares(a - b).sum()
+
 test "matmul/passes":
   let
     a = input("a", [1024, -1])
@@ -63,7 +65,7 @@ test "matmul/basic":
       a_tensor = new_rand_tensor[float32]([64, 64], float32(0)..float32(1))
       b_tensor = new_rand_tensor[float32]([64, 64], float32(0)..float32(1))
       expected = a_tensor * b_tensor
-    check squares(program.call("c", {"a": a_tensor, "b": b_tensor}) - expected).sum() < 0.1
+    check program.call("c", {"a": a_tensor, "b": b_tensor}).mse(expected) < 0.1
   else:
     let program = to_program([c.target("c", CompileGpu)])
     program.compile()
@@ -80,7 +82,7 @@ test "matmul/unknown_shape":
       a_tensor = new_rand_tensor[float32]([64, 64], float32(0)..float32(1))
       b_tensor = new_rand_tensor[float32]([64, 64], float32(0)..float32(1))
       expected = a_tensor * b_tensor
-    check squares(program.call("c", {"a": a_tensor, "b": b_tensor}) - expected).sum() < 0.1
+    check program.call("c", {"a": a_tensor, "b": b_tensor}).mse(expected) < 0.1
   else:
     let program = to_program([c.target("c", CompileGpu)])
     program.compile()
@@ -97,7 +99,7 @@ test "matmul/unknown_dim":
       a_tensor = new_rand_tensor[float32]([64, 64], float32(0)..float32(1))
       b_tensor = new_rand_tensor[float32]([64, 64], float32(0)..float32(1))
       expected = a_tensor * b_tensor
-    check squares(program.call("c", {"a": a_tensor, "b": b_tensor}) - expected).sum() < 0.1
+    check program.call("c", {"a": a_tensor, "b": b_tensor}).mse(expected) < 0.1
   else:
     let program = to_program([c.target("c", CompileGpu)])
     program.compile()
@@ -125,7 +127,7 @@ test "matmul/schedule/tiled16":
       a_tensor = new_rand_tensor[float32]([64, 64], float32(0)..float32(1))
       b_tensor = new_rand_tensor[float32]([64, 64], float32(0)..float32(1))
       expected = a_tensor * b_tensor
-    check squares(program.call("c", {"a": a_tensor, "b": b_tensor}) - expected).sum() < 0.1
+    check program.call("c", {"a": a_tensor, "b": b_tensor}).mse(expected) < 0.1
   else:
     let program = to_program([c.target("c", CompileGpu)])
     program.compile()
@@ -152,7 +154,7 @@ test "matmul/schedule/tiled32x16/known_shapes":
       a_tensor = new_rand_tensor[float32]([64, 64], float32(0)..float32(1))
       b_tensor = new_rand_tensor[float32]([64, 64], float32(0)..float32(1))
       expected = a_tensor * b_tensor
-    check squares(program.call("c", {"a": a_tensor, "b": b_tensor}) - expected).sum() < 0.1
+    check program.call("c", {"a": a_tensor, "b": b_tensor}).mse(expected) < 0.1
   else:
     let program = to_program([c.target("c", CompileGpu)])
     program.compile()
@@ -179,7 +181,7 @@ test "matmul/schedule/tiled32x16/unknown_shapes":
       a_tensor = new_rand_tensor[float32]([64, 64], float32(0)..float32(1))
       b_tensor = new_rand_tensor[float32]([64, 64], float32(0)..float32(1))
       expected = a_tensor * b_tensor
-    check squares(program.call("c", {"a": a_tensor, "b": b_tensor}) - expected).sum() < 0.1
+    check program.call("c", {"a": a_tensor, "b": b_tensor}).mse(expected) < 0.1
   else:
     let program = to_program([c.target("c", CompileGpu)])
     program.compile()
@@ -203,7 +205,7 @@ test "conv1/basic":
       filter_tensor = new_rand_tensor[float32]([5], float32(-1)..float32(1))
       res_tensor = program.call("res", {"image": image_tensor, "filter": filter_tensor})
       expected = conv1(image_tensor, filter_tensor)
-    check squares(res_tensor - expected).sum() < 0.1
+    check res_tensor.mse(expected) < 0.1
   else:
     let program = to_program([res.target("res", CompileGpu)])
     program.compile()
@@ -227,11 +229,25 @@ test "conv1/schedule/tiled16":
       filter_tensor = new_rand_tensor[float32]([5], float32(-1)..float32(1))
       res_tensor = program.call("res", {"image": image_tensor, "filter": filter_tensor})
       expected = conv1(image_tensor, filter_tensor)
-    check squares(res_tensor - expected).sum() < 0.1
+    check res_tensor.mse(expected) < 0.1
   else:
     let program = to_program([res.target("res", CompileGpu)])
     program.compile()
     check_cache("conv1_schedule_tiled16.ir", $program)
+
+test "relu/basic":
+  let x = input("x")
+  y*{it} ++= select(x{it} > 0.0, x{it}, 0.01 * x{it}) | it
+  when TARGET_SUPPORTS_GPU:
+    let
+      program = compile[float32](y.target("y", CompileGpu), gpu=new_gpu_context())
+      x_tensor = new_tensor([2, 3], @[float32 1, 2, -1, -2, 0, 3])
+      y_tensor = new_tensor([2, 3], @[float32 1, 2, -0.01, -0.02, 0, 3])
+    check program.call("y", {"x": x_tensor}).mse(y_tensor) < 0.1
+  else:
+    let program = to_program([y.target("y", CompileGpu)])
+    program.compile()
+    check_cache("relu_basic.ir", $program)
 
 test "static_shapes":
   for (size, expect_bounds_cond) in [(1024, false), (512, false), (123, true), (8, true)]:

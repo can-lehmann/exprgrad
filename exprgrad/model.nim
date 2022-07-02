@@ -146,7 +146,10 @@ when TARGET_SUPPORTS_GPU:
     let kernel = model.gpu.kernels[kernel_id - 1]
     var group_size: seq[int] = @[]
     for it in 0..<work_dims:
-      group_size.add(global_size[it] div local_size[it]) # TODO: Handle tiles at border!
+      var size = global_size[it] div local_size[it]
+      if global_size[it] mod local_size[it] != 0:
+        size += 1
+      group_size.add(size)
     kernel.run(
       group_size,
       to_open_array(local_size, 0, work_dims - 1)
