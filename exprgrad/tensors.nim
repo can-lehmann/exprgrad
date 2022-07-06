@@ -334,6 +334,7 @@ proc reshape*[T](tensor: Tensor[T], shape: openArray[int]): Tensor[T] =
   if var_dim != -1:
     target_shape[var_dim] = tensor.len div len
   
+  assert target_shape.prod() == tensor.len
   result = alloc_tensor[T]()
   result.alloc_shape(target_shape, fill_zero = false)
   copy_mem(result.data[0].addr, tensor.data[0].addr, result.len * sizeof(T))
