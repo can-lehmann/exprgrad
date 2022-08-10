@@ -41,7 +41,7 @@ proc pack*(layout: GridLayout, pos, size: Index2, figure: Figure) =
 proc pack*(layout: GridLayout, pos: Index2, figure: Figure) =
   layout.pack(pos, Index2(x: 1, y: 1), figure)
 
-proc min_cell_sizes(layout: GridLayout, axis: Axis2): seq[float64] =
+proc min_cell_sizes(layout: GridLayout, axis: Axis): seq[float64] =
   var order = to_seq(0..<layout.figures.len)
   order.sort((a, b) => cmp(layout.figures[a].size[axis], layout.figures[b].size[axis]))
   
@@ -65,7 +65,7 @@ proc min_cell_sizes(layout: GridLayout, axis: Axis2): seq[float64] =
       for offset in 0..<figure.size[axis]:
         result[figure.pos[axis] + offset] += grow_by
 
-proc arrange_axis(layout: GridLayout, axis: Axis2, into: Inter): seq[Inter] =
+proc arrange_axis(layout: GridLayout, axis: Axis, into: Inter): seq[Inter] =
   var cells = layout.min_cell_sizes(axis)
    
   let
