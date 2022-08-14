@@ -163,6 +163,13 @@ proc normalize*[T](vec: Vector2[T]): Vector2[T] = vec / T(vec.length())
 proc normalize*[T](vec: Vector3[T]): Vector3[T] = vec / T(vec.length())
 proc normalize*[T](vec: Vector4[T]): Vector4[T] = vec / T(vec.length())
 
+proc cross*[T](a, b: Vector3[T]): Vector3[T] =
+  result = Vector3[T](
+    x: a.y * b.z - a.z * b.y,
+    y: a.z * b.x - a.x * b.z,
+    z: a.x * b.y - a.y * b.x
+  )
+
 proc to_vec2*(index: Index2): Vec2 =
   result = Vec2(x: float64(index.x), y: float64(index.y))
 {.pop.}
@@ -175,14 +182,19 @@ const
   AxisZ* = Axis(2)
   AxisW* = Axis(3)
 
-proc `[]`*[T](vec: Vector2[T], axis: Axis): T {.inline.} =
-  result = [vec.x, vec.y][int(axis)]
+{.push inline.}
+proc `[]`*[T](vec: Vector2[T], axis: Axis): T = [vec.x, vec.y][int(axis)]
+proc `[]`*[T](vec: Vector3[T], axis: Axis): T = [vec.x, vec.y, vec.z][int(axis)]
+proc `[]`*[T](vec: Vector4[T], axis: Axis): T = [vec.x, vec.y, vec.z, vec.w][int(axis)]
 
-proc `[]`*[T](vec: Vector3[T], axis: Axis): T {.inline.} =
-  result = [vec.x, vec.y, vec.z][int(axis)]
+proc `[]`*[T](vec: var Vector2[T], axis: Axis): var T = [vec.x.addr, vec.y.addr][int(axis)][]
+proc `[]`*[T](vec: var Vector3[T], axis: Axis): var T = [vec.x.addr, vec.y.addr, vec.z.addr][int(axis)][]
+proc `[]`*[T](vec: var Vector4[T], axis: Axis): var T = [vec.x.addr, vec.y.addr, vec.z.addr, vec.w.addr][int(axis)][]
 
-proc `[]`*[T](vec: Vector4[T], axis: Axis): T {.inline.} =
-  result = [vec.x, vec.y, vec.z, vec.w][int(axis)]
+proc `[]=`*[T](vec: var Vector2[T], axis: Axis, value: T) = [vec.x.addr, vec.y.addr][int(axis)][] = value
+proc `[]=`*[T](vec: var Vector3[T], axis: Axis, value: T) = [vec.x.addr, vec.y.addr, vec.z.addr][int(axis)][] = value
+proc `[]=`*[T](vec: var Vector4[T], axis: Axis, value: T) = [vec.x.addr, vec.y.addr, vec.z.addr, vec.w.addr][int(axis)][] = value
+{.pop.}
 
 type
   BoundingBox*[T] = object
@@ -197,6 +209,7 @@ type
   Box3* = BoundingBox3[float64]
 
 proc size*[T](box: BoundingBox[T]): T {.inline.} = box.max - box.min
+proc center*[T](box: BoundingBox[T]): T {.inline.} = (box.max + box.min) / 2
 
 proc x_inter*[T](box: BoundingBox2[T]): BoundingBox[T] =
   result = BoundingBox[T](min: box.min.x, max: box.max.x)
@@ -208,6 +221,13 @@ type
   StaticMatrix*[T; H, W: static[int]] = object
     data*: array[H * W, T]
   
+  Matrix2*[T] = StaticMatrix[T, 2, 2]
+  Mat2* = StaticMatrix[float64, 2, 2]
+  
+  Matrix3*[T] = StaticMatrix[T, 3, 3]
+  Mat3* = StaticMatrix[float64, 3, 3]
+  
+  Matrix4*[T] = StaticMatrix[T, 4, 4]
   Mat4* = StaticMatrix[float64, 4, 4]
 
 {.push inline.}
@@ -222,27 +242,84 @@ proc transpose*[T, H, W](matrix: StaticMatrix[T, W, H]): StaticMatrix[T, H, W] =
       result[y, x] = matrix[x, y]
 
 proc `*`*[T, H, W, N](a: StaticMatrix[T, H, N],
-                      b: StaticMatrix[T, N, W]): StaticMatrix[T, W, H] =
+                      b: StaticMatrix[T, N, W]): StaticMatrix[T, H, W] =
   for y in 0..<H:
     for it in 0..<N:
       for x in 0..<W:
         result[y, x] += a[y, it] * b[it, x]
 
+proc `[]`*[T, H, W](mat: StaticMatrix[T, H, W],
+                    y_slice: static[HSlice[int, int]],
+                    x_slice: static[HSlice[int, int]]): auto =
+  result = StaticMatrix[T, y_slice.b - y_slice.a + 1, x_slice.b - x_slice.a + 1]()
+  for y in y_slice:
+    for x in y_slice:
+      result[y - y_slice.a, x - x_slice.a] = mat[y, x]
+
+proc det*[T](mat: Matrix2[T]): T =
+  result = mat[0, 0] * mat[1, 1] - mat[0, 1] * mat[1, 0]
+
+proc det*[T](mat: Matrix3[T]): T =
+  for x in 0..<3:
+    var
+      a = T(1)
+      b = T(-1)
+    for y in 0..<3:
+      a *= mat[y, (x + y) mod 3]
+      b *= mat[2 - y, (x + y) mod 3]
+    result += a + b
+
+proc invert*[T](mat: Matrix3[T]): Matrix3[T] =
+  template wrap(x, y: int): int =
+    var res = x mod y
+    if res < 0:
+      res += y
+    res
+  
+  template at(y, x: int): T = mat[wrap(y, 3), wrap(x, 3)]
+  
+  let d = det(mat)
+  for y in 0..<3:
+    for x in 0..<3:
+      let
+        a = at(x + 1, y + 1) * at(x - 1, y - 1)
+        b = at(x + 1, y - 1) * at(x - 1, y + 1)
+      result[y, x] = (a - b) / d
+
 proc identity*[T, N](_: typedesc[StaticMatrix[T, N, N]]): StaticMatrix[T, N, N] =
   for it in 0..<N:
     result[it, it] = T(1)
 
-proc translate*[T](typ: typedesc[StaticMatrix[T, 4, 4]], offset: Vector3[T]): StaticMatrix[T, 4, 4] =
+proc translate*[T](typ: typedesc[Matrix4[T]], offset: Vector3[T]): Matrix4[T] =
   result = typ.identity()
   result[0, 3] = offset.x
   result[1, 3] = offset.y
   result[2, 3] = offset.z
+
+proc scale*[T](typ: typedesc[Matrix4[T]], factors: Vector3[T]): Matrix4[T] =
+  result[0, 0] = factors.x
+  result[1, 1] = factors.y
+  result[2, 2] = factors.z
+  result[3, 3] = T(1)
+
+proc to_matrix*[T](vec: Vector2[T]): StaticMatrix[T, 2, 1] =
+  result = StaticMatrix[T, 2, 1](data: [vec.x, vec.y])
+
+proc to_matrix*[T](vec: Vector3[T]): StaticMatrix[T, 3, 1] =
+  result = StaticMatrix[T, 3, 1](data: [vec.x, vec.y, vec.z])
+
+proc to_matrix*[T](vec: Vector4[T]): StaticMatrix[T, 4, 1] =
+  result = StaticMatrix[T, 4, 1](data: [vec.x, vec.y, vec.z, vec.w])
+
+proc to_vector3*[T](mat: StaticMatrix[T, 3, 1]): Vector3[T] =
+  result = Vector3[T](x: mat.data[0], y: mat.data[1], z: mat.data[2])
 
 template define_unit(T, Base: untyped, sym: string) =
   type T* = distinct Base
   
   proc `+`*(a, b: T): T {.borrow.}
   proc `-`*(a, b: T): T {.borrow.}
+  proc `-`*(x: T): T {.borrow.}
   proc `/`*(a, b: T): float64 {.borrow.}
   
   proc `*`*(a: float64, b: T): T {.borrow.}
@@ -253,6 +330,12 @@ template define_unit(T, Base: untyped, sym: string) =
   proc `==`*(a, b: T): bool {.borrow.}
   proc `<`*(a, b: T): bool {.borrow.}
   proc `<=`*(a, b: T): bool {.borrow.}
+  
+  proc `+=`*(a: var T, b: T) {.borrow.}
+  proc `-=`*(a: var T, b: T) {.borrow.}
+  
+  proc min*(a, b: T): T {.borrow.}
+  proc max*(a, b: T): T {.borrow.}
   
   proc hash*(a: T): Hash {.borrow.}
   
@@ -271,6 +354,27 @@ converter to_deg*(rad: Rad): Deg =
 proc sin*(rad: Rad): float64 = sin(float64(rad))
 proc cos*(rad: Rad): float64 = cos(float64(rad))
 proc tan*(rad: Rad): float64 = tan(float64(rad))
+
+proc rotate_x*(_: typedesc[Mat3], angle: Rad): Mat3 =
+  result = Mat3(data: [
+    float64 1, 0, 0,
+    0, cos(angle), -sin(angle),
+    0, sin(angle), cos(angle)
+  ])
+
+proc rotate_y*(_: typedesc[Mat3], angle: Rad): Mat3 =
+  result = Mat3(data: [
+    cos(angle), 0, sin(angle),
+    0, 1, 0,
+    -sin(angle), 0, cos(angle)
+  ])
+
+proc rotate_z*(_: typedesc[Mat3], angle: Rad): Mat3 =
+  result = Mat3(data: [
+    cos(angle), -sin(angle), 0,
+    sin(angle), cos(angle), 0,
+    0, 0, 1
+  ])
 
 proc rotate_x*(_: typedesc[Mat4], angle: Rad): Mat4 =
   result = Mat4(data: [
