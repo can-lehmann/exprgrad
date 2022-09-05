@@ -48,6 +48,14 @@ proc close*(stream: var ReadStream) =
     stream.file.close()
     stream.file = nil
 
+proc seek*(stream: var ReadStream, pos: int64) =
+  if stream.file.is_nil:
+    stream.cur = int(pos)
+    stream.left = stream.buffer.len - int(pos)
+  else:
+    stream.file.set_file_pos(pos)
+    stream.fill_buffer()
+
 {.push inline.}
 proc peek_char*(stream: ReadStream): char =
   stream.buffer[stream.cur]
@@ -61,6 +69,9 @@ proc read_char*(stream: var ReadStream): char =
 
 proc peek_uint8*(stream: ReadStream): uint8 = uint8(stream.peek_char())
 proc read_uint8*(stream: var ReadStream): uint8 = uint8(stream.read_char())
+
+proc read_byte*(stream: var ReadStream): byte = byte(stream.read_char())
+proc peek_byte*(stream: var ReadStream): byte = byte(stream.peek_char())
 
 proc take_char*(stream: var ReadStream, chr: char): bool =
   result = stream.peek_char() == chr
