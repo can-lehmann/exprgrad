@@ -21,42 +21,61 @@ type ReadStream* = object
   buffer: string
   cur: int
   left: int
+  pos: int64
 
 proc fill_buffer(stream: var ReadStream) =
   stream.cur = 0
-  if stream.file.is_nil:
-    zero_mem(stream.buffer[0].addr, stream.buffer.len)
+  when nimvm:
+    assert stream.file.is_nil
+    for it in 0..<stream.buffer.len:
+      stream.buffer[it] = '\0'
   else:
-    stream.left = stream.file.read_buffer(
-      stream.buffer[0].addr, stream.buffer.len
-    )
-
-proc open_read_stream*(path: string, buffer_size: int = 2 ^ 14): ReadStream =
-  assert buffer_size > 0
-  if not file_exists(path):
-    raise new_exception(IoError, "Unable to open file " & path)
-  result.file = open(path, fmRead)
-  result.buffer = new_string(buffer_size)
-  result.fill_buffer()
+    if stream.file.is_nil:
+      zero_mem(stream.buffer[0].addr, stream.buffer.len)
+    else:
+      stream.left = stream.file.read_buffer(
+        stream.buffer[0].addr, stream.buffer.len
+      )
 
 proc init_read_stream*(str: string): ReadStream =
   result.buffer = str
   result.left = str.len
 
+proc open_read_stream*(path: string, buffer_size: int = 2 ^ 14): ReadStream =
+  when nimvm:
+    result = init_read_stream(read_file(path))
+  else:
+    assert buffer_size > 0
+    if not file_exists(path):
+      raise new_exception(IoError, "Unable to open file " & path)
+    result.file = open(path, fmRead)
+    result.buffer = new_string(buffer_size)
+    result.fill_buffer()
+
 proc close*(stream: var ReadStream) =
-  if not stream.file.is_nil:
-    stream.file.close()
-    stream.file = nil
+  when nimvm:
+    discard
+  else:
+    if not stream.file.is_nil:
+      stream.file.close()
+      stream.file = nil
 
 proc seek*(stream: var ReadStream, pos: int64) =
-  if stream.file.is_nil:
+  stream.pos = pos
+  when nimvm:
     stream.cur = int(pos)
     stream.left = stream.buffer.len - int(pos)
   else:
-    stream.file.set_file_pos(pos)
-    stream.fill_buffer()
+    if stream.file.is_nil:
+      stream.cur = int(pos)
+      stream.left = stream.buffer.len - int(pos)
+    else:
+      stream.file.set_file_pos(pos)
+      stream.fill_buffer()
 
 {.push inline.}
+proc position*(stream: var ReadStream): int64 = stream.pos
+
 proc peek_char*(stream: ReadStream): char =
   stream.buffer[stream.cur]
 
@@ -64,6 +83,7 @@ proc read_char*(stream: var ReadStream): char =
   result = stream.buffer[stream.cur]
   stream.cur += 1
   stream.left -= 1
+  stream.pos += 1
   if stream.cur >= stream.buffer.len:
     stream.fill_buffer()
 
