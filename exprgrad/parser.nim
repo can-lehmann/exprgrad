@@ -459,7 +459,7 @@ type TargetInfo = object
 proc parse_target(node: NimNode): TargetInfo =
   case node.kind:
     of nnkInfix:
-      assert node[0].is_name("*")
+      assert node[0].eq_ident("*")
       result.define_tensor = true
       result.tensor = node[1]
       assert node[2].kind in {nnkCurly, nnkBracket}
@@ -472,6 +472,13 @@ proc parse_target(node: NimNode): TargetInfo =
       result.is_raw = node.kind == nnkCurlyExpr
       for it in 1..<node.len:
         result.dims.add(node[it])
+    of nnkCall:
+      if node[0].eq_ident("[]") or node[0].eq_ident("{}"):
+        result.tensor = node[1]
+        for it in 2..<node.len:
+          result.dims.add(node[it])
+      else:
+        error("Invalid target: " & node.repr)
     else:
       error("Invalid target: " & node.repr)
 
@@ -562,7 +569,7 @@ proc parse_attrs(node: NimNode): KernelAttrs =
           for kernel_node in child[1]:
             if kernel_node.kind == nnkDiscardStmt:
               continue
-            if kernel_node.kind != nnkInfix or not kernel_node[0].is_name("++=") or kernel_node.len < 3:
+            if kernel_node.kind != nnkInfix or not kernel_node[0].eq_ident("++=") or kernel_node.len < 3:
               raise ParserError(msg: "Custom gradient must be a valid kernel")
             
             var attrs = KernelAttrs()
@@ -626,7 +633,7 @@ proc gen_kernel_builder(target: TargetInfo, value_node: NimNode, attrs: KernelAt
   var
     value = value_node
     iters: seq[Iterator] = @[]
-  if value.kind == nnkInfix and value[0].is_name("|"):
+  if value.kind == nnkInfix and value[0].eq_ident("|"):
     value = value[1]
     iters = value_node[2].parse_iterators()
   var fields = @{
