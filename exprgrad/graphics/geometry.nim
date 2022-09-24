@@ -172,6 +172,9 @@ proc cross*[T](a, b: Vector3[T]): Vector3[T] =
 
 proc to_vec2*(index: Index2): Vec2 =
   result = Vec2(x: float64(index.x), y: float64(index.y))
+
+proc to_index2*(vec: Vec2): Index2 =
+  result = Index2(x: int(vec.x), y: int(vec.y))
 {.pop.}
 
 type Axis* = distinct int
