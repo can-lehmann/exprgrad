@@ -95,3 +95,19 @@ macro check*(cond: untyped): untyped =
   result = quote:
     if not `cond`:
       raise TestError(msg: `condStr`, env: `env`, line: `line`, column: `column`)
+
+macro checkException*(exception, body: untyped): untyped =
+  let
+    msg = "Expected block to raise " & repr(exception)
+    line = body.lineInfoObj.line
+    column = body.lineInfoObj.column
+  
+  result = quote:
+    block:
+      var raised = false
+      try:
+        `body`
+      except `exception`:
+        raised = true
+      if not raised:
+        raise TestError(msg: `msg`, line: `line`, column: `column`)

@@ -477,7 +477,11 @@ proc derive*(kernel: Kernel, gradTensors: Table[TensorId, TensorId]): seq[Kernel
       result.add(gradKernel)
 
 proc copyShape(target: Target, dest, src: TensorId) =
-  target.shapes.add(ShapeConstraint(kind: ShapeCopy, dest: dest, src: src))
+  target.shapes.add(ShapeConstraint(kind: ShapeCopy,
+    priority: PriorityInferred,
+    dest: dest,
+    src: src
+  ))
 
 proc generate*(program: Program) =
   program.assertPass("generate",
@@ -978,29 +982,43 @@ proc simplifyMaxIndex(indices: var seq[LinearIndex]) =
       factors: factors, constant: constant
     ))
 
-proc inferShapeConstraints(kernel: Kernel): ShapeConstraint =
+proc inferShapeConstraints(kernel: Kernel): seq[ShapeConstraint] =
   if kernel.write.isRaw:
     if kernel.reads.len == 1:
-      result = ShapeConstraint(kind: ShapeCopy,
+      result.add(ShapeConstraint(kind: ShapeCopy,
+        priority: PriorityInferred,
         src: kernel.reads[0].tensor,
         dest: kernel.write.tensor
-      )
+      ))
   else:
-    result = ShapeConstraint(kind: ShapeLinear)
+    var linear = ShapeConstraint(
+      kind: ShapeLinear,
+      priority: PriorityInferred
+    )
+    
     for op in kernel.reads:
       if not op.isRaw:
-        if op.tensor notin result.reads:
-          result.reads[op.tensor] = newSeq[seq[LinearIndex]](op.dims.len)
+        if op.tensor notin linear.reads:
+          linear.reads[op.tensor] = newSeq[seq[LinearIndex]](op.dims.len)
         for it, dim in op.dims:
-          result.reads[op.tensor][it].add(dim)
+          linear.reads[op.tensor][it].add(dim)
     
-    result.dest = kernel.write.tensor
+    linear.dest = kernel.write.tensor
     for it, dim in kernel.write.dims:
-      result.write.add(dim)
+      linear.write.add(dim)
     
-    for tensor, dims in result.reads.mpairs:
+    for tensor, dims in linear.reads.mpairs:
       for dim in dims.mitems:
         dim.simplifyMaxIndex()
+    result.add(linear)
+  
+  for kind, op in kernel.tensorOps:
+    if not op.isRaw:
+      result.add(ShapeConstraint(kind: ShapeRank,
+        dest: op.tensor,
+        priority: PriorityCondition,
+        rank: op.dims.len
+      ))
 
 proc inferShapeConstraints*(program: Program) =
   program.assertPass("inferShapeConstraints",
@@ -1015,16 +1033,38 @@ proc inferShapeConstraints*(program: Program) =
     for tensor in program.caches:
       let tensorDef = program.tensors[tensor]
       target.shapes.add(ShapeConstraint(kind: ShapeCopy,
-        src: tensorDef.cache, dest: tensor
+        priority: PriorityInferred,
+        src: tensorDef.cache,
+        dest: tensor
       ))
     
     for it, kernel in target.kernels:
       if kernel.generator.kind == GenNone:
         target.shapes.add(kernel.inferShapeConstraints())
 
+proc isUnderconstrained(shape: ShapeConstraint): bool =
+  case shape.kind:
+    of ShapeNone: result = true
+    of ShapeRank: result = shape.rank > 0
+    of ShapeDims, ShapeCopy: result = false
+    of ShapeLinear:
+      result = false
+      # TODO: Linear system
+      var defined = initHashSet[RegId]()
+      for tensor, dims in shape.reads:
+        for dim, indices in dims:
+          assert indices.len == 1
+          let index = indices[0]
+          for reg, factor in index.factors:
+            defined.incl(reg)
+      for dim in shape.write:
+        for reg, factor in dim.factors:
+          if reg notin defined:
+            return true
+
 iterator deps(shape: ShapeConstraint): TensorId =
   case shape.kind:
-    of ShapeNone: discard
+    of ShapeNone, ShapeRank: discard
     of ShapeDims:
       for dim in shape.dims:
         for instr in dim.setup:
@@ -1036,16 +1076,18 @@ iterator deps(shape: ShapeConstraint): TensorId =
     of ShapeCopy: yield shape.src
 
 proc flattenConstraints(tensor: TensorId,
-                         tensors: Table[TensorId, ShapeConstraint],
-                         closed: var seq[bool],
-                         order: var seq[ShapeConstraint],
-                         program: Program) =
+                        tensors: Table[TensorId, ShapeConstraint],
+                        closed: var seq[bool],
+                        order: var seq[ShapeConstraint],
+                        program: Program) =
   if program.tensors[tensor].kind in {TensorResult, TensorCache, TensorRandom} and
      not closed[tensor]:
     closed[tensor] = true
     if tensor notin tensors:
       raise ShapeError(msg: $tensor & " (" & program.tensors[tensor].name & ") requires shape")
     let constr = tensors[tensor]
+    if constr.isUnderconstrained():
+      raise ShapeError(msg: "Shape for " & $tensor & " is underconstrained")
     for dep in constr.deps:
       dep.flattenConstraints(tensors, closed, order, program)
     order.add(constr)
@@ -1062,11 +1104,41 @@ proc sortShapeConstraints*(program: Program) =
       tensors = initTable[TensorId, ShapeConstraint]()
       closed = newSeq[bool](program.tensors.len)
     
+    var conditions = newSeq[ShapeConstraint]()
     for constr in target.shapes:
-      if constr.dest notin tensors:
+      if constr.dest notin tensors or
+         tensors[constr.dest].priority < constr.priority:
         tensors[constr.dest] = constr
-      else:
-        discard # TODO: Unify current and new constraint
+      
+      if constr.priority == PriorityCondition:
+        conditions.add(constr)
+    
+    for cond in conditions:
+      assert cond.kind == ShapeRank # TODO
+      if cond.dest in tensors:
+        var constr = tensors[cond.dest]
+        while constr.kind == ShapeCopy and
+              constr.src in tensors and
+              program.tensors[constr.dest].shape.len == 0:
+          constr = tensors[constr.src]
+        
+        if constr.kind == ShapeCopy and
+           program.tensors[constr.dest].shape.len == 0:
+          tensors[constr.src] = cond
+        else:
+          let rank = block:
+            if program.tensors[constr.dest].shape.len > 0:
+              program.tensors[constr.dest].shape.len
+            else:
+              assert constr.kind in {ShapeDims, ShapeLinear, ShapeRank}
+              case constr.kind:
+                of ShapeDims: constr.dims.len
+                of ShapeLinear: constr.write.len
+                of ShapeRank: constr.rank
+                else: -1
+          
+          if cond.rank != rank:
+            raise ShapeError(msg: "A condition requires that " & $cond.dest & " has rank " & $cond.rank & ", but it has rank " & $rank)
     
     var order = newSeq[ShapeConstraint]()
     for tensor in target.tensors:
@@ -1238,8 +1310,8 @@ proc matches(staticShape, shape: seq[int]): bool =
     result = true
 
 proc inferShapes*(program: Program,
-                   target: string,
-                   inputs: openArray[(TensorId, seq[int])]): Table[TensorId, seq[int]] =
+                  target: string,
+                  inputs: openArray[(TensorId, seq[int])]): Table[TensorId, seq[int]] =
   result = initTable[TensorId, seq[int]]()
   for (tensor, shape) in inputs:
     result[tensor] = shape
@@ -1251,6 +1323,7 @@ proc inferShapes*(program: Program,
   for shape in program.targets[target].shapes:
     case shape.kind:
       of ShapeNone: discard
+      of ShapeRank: result[shape.dest] = newSeq[int](shape.rank)
       of ShapeDims:
         var sizes = newSeq[int](shape.dims.len)
         for dim, index in shape.dims:
@@ -1301,6 +1374,10 @@ proc inferStaticShapes*(program: Program) =
       var dims: seq[int] = @[]
       case shape.kind:
         of ShapeNone: discard
+        of ShapeRank:
+          dims = newSeq[int](shape.rank)
+          for dim in dims.mitems:
+            dim = -1
         of ShapeDims:
           dims = newSeq[int](shape.dims.len)
           for dim, size in shape.dims:
@@ -1518,7 +1595,7 @@ proc buildShapeTokens(program: Program): ShapeTokens =
   for name, target in program.targets:
     for shape in target.shapes:
       case shape.kind:
-        of ShapeNone: discard
+        of ShapeNone, ShapeRank: discard
         of ShapeDims:
           if result[shape.dest].len == 0:
             result[shape.dest] = newSeq[TokenId](shape.dims.len)

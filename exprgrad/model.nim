@@ -346,7 +346,7 @@ proc allocShapes[T](model: Model[T], target: Target, shapes: Table[ir.TensorId, 
 
 proc writeInput[T](model: Model[T], to: CompileTarget, name: string, tensor: Tensor[T]) =
   if name notin model.program.inputs:
-    raise newException(ValueError, name & " is not an input to the model")
+    raise RuntimeError(msg: name & " is not an input to the model")
   let tensorId = model.program.inputs[name]
   case to:
     of CompileCpu, CompileThreads:
@@ -382,11 +382,15 @@ proc callJit[T](model: Model[T], targetName: string): Tensor[T] =
 proc call*[T](model: Model[T],
               targetName: string,
               args: openArray[(string, Tensor[T])] = []): Tensor[T] =
+  if targetName notin model.program.targets:
+    raise RuntimeError(msg: targetName & " is not a target of the model")
   let target = model.program.targets[targetName]
+  
   var inputShapes = newSeq[(TensorId, seq[int])](args.len)
   for it, (name, tensor) in args:
     model.writeInput(target.compileTarget, name, tensor)
     inputShapes[it] = (model.program.inputs[name], tensor.shape)
+  
   let shapes = model.program.inferShapes(targetName, inputShapes)
   model.allocShapes(target, shapes)
   result = model.callJit(targetName)
@@ -402,7 +406,10 @@ proc fit*[T](model: Model[T],
              batchSize: int = 32,
              logStatus: bool = true) =
   if args.len == 0:
-    raise newException(ValueError, "Model.fit requires at least one input tensor. Use Model.apply instead if the target has zero inputs.")
+    raise RuntimeError(msg: "Model.fit requires at least one input tensor. Use Model.apply instead if the target has zero inputs.")
+  if targetName notin model.program.targets:
+    raise RuntimeError(msg: targetName & " is not a target of the model")
+  
   let
     target = model.program.targets[targetName]
     batchCount = args[0][1].shape[0] div batchSize
@@ -410,7 +417,7 @@ proc fit*[T](model: Model[T],
   var inputShapes = newSeq[(TensorId, seq[int])](args.len)
   for it, (name, arg) in args:
     if name notin model.program.inputs:
-      raise newException(ValueError, name & " is not an input to the model")
+      raise RuntimeError(msg: name & " is not an input to the model")
     inputShapes[it] = (model.program.inputs[name], @[batchSize] & arg.shape[1..^1])
   
   let shapes = model.program.inferShapes(targetName, inputShapes)

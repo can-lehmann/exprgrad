@@ -60,7 +60,7 @@ type
   
   ShapeConstraintBuilder* = object
     case kind: ShapeConstrKind:
-      of ShapeNone, ShapeLinear: discard
+      of ShapeNone, ShapeLinear, ShapeRank: discard
       of ShapeDims: dims: seq[Index]
       of ShapeCopy: copy: Fun
   
@@ -329,11 +329,15 @@ proc flatten(fun: Fun, target: Target) =
         case fun.shapeConstr.kind:
           of ShapeCopy:
             target.shapes.add(ShapeConstraint(kind: ShapeCopy,
+              priority: PriorityUser,
               dest: fun.tensor,
               src: fun.shapeConstr.copy.tensor
             ))
           of ShapeDims:
-            var constr = ShapeConstraint(kind: ShapeDims, dest: fun.tensor)
+            var constr = ShapeConstraint(kind: ShapeDims,
+              priority: PriorityUser,
+              dest: fun.tensor
+            )
             for dim in fun.shapeConstr.dims:
               var ctx = BuildContext(kernel: Kernel())
               ExprBuilder(dim).clear()
@@ -373,7 +377,9 @@ proc flatten(fun: Fun, target: Target) =
         fun.tensor = child.tensor
       of FunRandom:
         target.shapes.add(ShapeConstraint(kind: ShapeCopy,
-          dest: fun.tensor, src: fun.children[0].tensor
+          priority: PriorityUser,
+          dest: fun.tensor,
+          src: fun.children[0].tensor
         ))
       else: discard
 

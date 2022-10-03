@@ -24,6 +24,7 @@ type
   GeneratorError* = ref object of CompilerError
   JitError* = ref object of CompilerError
   StageError* = ref object of CompilerError
+  RuntimeError* = ref object of CompilerError
   ShapeError* = ref object of CompilerError
   ValidationError* = ref object of CompilerError
 
@@ -172,12 +173,17 @@ type
     schedule*: TensorSchedule
   
   ShapeConstrKind* = enum
-    ShapeNone, ShapeDims, ShapeLinear, ShapeCopy
+    ShapeNone, ShapeDims, ShapeLinear, ShapeCopy, ShapeRank
+  
+  ShapeConstrPriority* = enum
+    PriorityCondition, PriorityInferred, PriorityUser
   
   ShapeConstraint* = object
     dest*: TensorId
+    priority*: ShapeConstrPriority
     case kind*: ShapeConstrKind:
       of ShapeNone: discard
+      of ShapeRank: rank*: int
       of ShapeDims: dims*: seq[LinearIndex]
       of ShapeLinear:
         reads*: Table[TensorId, seq[seq[LinearIndex]]]
@@ -357,6 +363,7 @@ proc `==`*(a, b: ShapeConstraint): bool =
   if a.kind == b.kind and a.dest == b.dest:
     case a.kind:
       of ShapeNone: result = true
+      of ShapeRank: result = a.rank == b.rank
       of ShapeDims: result = a.dims == b.dims
       of ShapeLinear: result = a.reads == b.reads and a.write == b.write
       of ShapeCopy: result = a.src == b.src
@@ -488,7 +495,7 @@ proc substitute*(shape: var ShapeConstraint, subs: Table[TensorId, TensorId]) =
   if shape.dest in subs:
     shape.dest = subs[shape.dest]
   case shape.kind:
-    of ShapeNone: discard
+    of ShapeNone, ShapeRank: discard
     of ShapeDims:
       for dim in shape.dims.mitems:
         dim.substitute(subs)
