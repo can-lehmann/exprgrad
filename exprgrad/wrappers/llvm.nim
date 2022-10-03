@@ -64,14 +64,14 @@ type
     CodeModelDefault, CodeModelJitDefault, CodeModelTiny, CodeModelSmall,
     CodeModelKernel, CodeModelMedium, CodeModelLarge
 
-proc is_nil*(x: ValueRef): bool {.borrow.}
-proc is_nil*(x: TypeRef): bool {.borrow.}
-proc is_nil*(x: ModuleRef): bool {.borrow.}
-proc is_nil*(x: ExecutionEngineRef): bool {.borrow.}
-proc is_nil*(x: PassManagerRef): bool {.borrow.}
-proc is_nil*(x: MemoryBufferRef): bool {.borrow.}
-proc is_nil*(x: PassRegistryRef): bool {.borrow.}
-proc is_nil*(x: ErrorRef): bool {.borrow.}
+proc isNil*(x: ValueRef): bool {.borrow.}
+proc isNil*(x: TypeRef): bool {.borrow.}
+proc isNil*(x: ModuleRef): bool {.borrow.}
+proc isNil*(x: ExecutionEngineRef): bool {.borrow.}
+proc isNil*(x: PassManagerRef): bool {.borrow.}
+proc isNil*(x: MemoryBufferRef): bool {.borrow.}
+proc isNil*(x: PassRegistryRef): bool {.borrow.}
+proc isNil*(x: ErrorRef): bool {.borrow.}
 
 {.push header: "<llvm-c/Core.h>".}
 proc get_global_context*(): ContextRef {.importc: "LLVMGetGlobalContext".}
@@ -92,14 +92,14 @@ proc create_memory_buffer_with_contents_of_file*(path: cstring, mem: ptr MemoryB
 proc dispose_memory_buffer*(mem: MemoryBufferRef) {.importc: "LLVMDisposeMemoryBuffer".}
 
 proc add_attribute_at_index*(fn: ValueRef, idx: cuint, attr: AttributeRef) {.importc: "LLVMAddAttributeAtIndex".}
-proc create_string_attribute*(ctx: ContextRef, key: cstring, key_len: cuint, val: cstring, val_len: cuint): AttributeRef {.importc: "LLVMCreateStringAttribute".}
+proc create_string_attribute*(ctx: ContextRef, key: cstring, keyLen: cuint, val: cstring, valLen: cuint): AttributeRef {.importc: "LLVMCreateStringAttribute".}
 
 proc md_string_in_context2*(ctx: ContextRef, str: cstring, len: csize_t): MetadataRef {.importc: "LLVMMDStringInContext2".}
 proc md_node_in_context2*(ctx: ContextRef, children: ptr MetadataRef, count: csize_t): MetadataRef {.importc: "LLVMMDNodeInContext2".}
 proc metadata_as_value*(ctx: ContextRef, md: MetadataRef): ValueRef {.importc: "LLVMMetadataAsValue".}
 proc value_as_metadata*(val: ValueRef): MetadataRef {.importc: "LLVMValueAsMetadata".}
 proc get_md_string*(val: ValueRef, len: ptr cuint): cstring {.importc: "LLVMGetMDString".}
-proc set_metadata*(val: ValueRef, kind_id: cuint, node: ValueRef) {.importc: "LLVMSetMetadata".}
+proc set_metadata*(val: ValueRef, kindId: cuint, node: ValueRef) {.importc: "LLVMSetMetadata".}
 proc has_metadata*(val: ValueRef): cint {.importc: "LLVMHasMetadata".}
 proc get_md_kind_id_in_context*(ctx: ContextRef, name: cstring, len: cuint): cuint {.importc: "LLVMGetMDKindIDInContext".}
 proc get_md_kind_id*(name: cstring, len: cuint): cuint {.importc: "LLVMGetMDKindID".}
@@ -107,17 +107,17 @@ proc add_named_metadata_operand*(module: ModuleRef, name: cstring, val: ValueRef
 proc get_or_insert_named_metadata*(module: ModuleRef, name: cstring, len: csize_t): NamedMDNodeRef {.importc: "LLVMGetOrInsertNamedMetadata".}
 
 proc append_basic_block*(function: ValueRef, name: cstring): BasicBlockRef {.importc: "LLVMAppendBasicBlock".}
-proc get_first_instruction*(basic_block: BasicBlockRef): ValueRef {.importc: "LLVMGetFirstInstruction".}
-proc get_last_instruction*(basic_block: BasicBlockRef): ValueRef {.importc: "LLVMGetLastInstruction".}
+proc get_first_instruction*(basicBlock: BasicBlockRef): ValueRef {.importc: "LLVMGetFirstInstruction".}
+proc get_last_instruction*(basicBlock: BasicBlockRef): ValueRef {.importc: "LLVMGetLastInstruction".}
 proc get_entry_basic_block*(fn: ValueRef): BasicBlockRef {.importc: "LLVMGetEntryBasicBlock".}
 
 proc create_module_provider_for_existing_module*(module: ModuleRef): ModuleProviderRef {.importc: "LLVMCreateModuleProviderForExistingModule".}
 proc dispose_module_provider*(provider: ModuleProviderRef) {.importc: "LLVMDisposeModuleProvider".}
 
 proc create_builder*(): BuilderRef {.importc: "LLVMCreateBuilder".}
-proc position_builder_at_end*(builder: BuilderRef, basic_block: BasicBlockRef) {.importc: "LLVMPositionBuilderAtEnd".}
+proc position_builder_at_end*(builder: BuilderRef, basicBlock: BasicBlockRef) {.importc: "LLVMPositionBuilderAtEnd".}
 proc get_insert_block*(builder: BuilderRef): BasicBlockRef {.importc: "LLVMGetInsertBlock".}
-proc position_builder*(builder: BuilderRef, basic_block: BasicBlockRef, instr: ValueRef) {.importc: "LLVMPositionBuilder".}
+proc position_builder*(builder: BuilderRef, basicBlock: BasicBlockRef, instr: ValueRef) {.importc: "LLVMPositionBuilder".}
 proc position_builder_before*(builder: BuilderRef, instr: ValueRef) {.importc: "LLVMPositionBuilderBefore".}
 proc dispose_builder*(builder: BuilderRef) {.importc: "LLVMDisposeBuilder".}
 proc set_default_fp_math_tag*(builder: BuilderRef, tag: MetadataRef) {.importc: "LLVMBuilderSetDefaultFPMathTag".}
@@ -147,21 +147,21 @@ proc float16_type*(): TypeRef {.importc: "LLVMHalfType".}
 proc float32_type*(): TypeRef {.importc: "LLVMFloatType".}
 proc float64_type*(): TypeRef {.importc: "LLVMDoubleType".}
 proc float128_type*(): TypeRef {.importc: "LLVMFP128Type".}
-proc pointer_type*(elem: TypeRef, address_space: cuint): TypeRef {.importc: "LLVMPointerType".}
-proc function_type*(ret: TypeRef, args: ptr TypeRef, arg_count: cuint, is_var_arg: LlvmBool): TypeRef {.importc: "LLVMFunctionType".}
-proc struct_type*(elem_types: ptr TypeRef, count: cuint, packed: LlvmBool): TypeRef {.importc: "LLVMStructType".}
+proc pointer_type*(elem: TypeRef, addressSpace: cuint): TypeRef {.importc: "LLVMPointerType".}
+proc function_type*(ret: TypeRef, args: ptr TypeRef, argCount: cuint, isVarArg: LlvmBool): TypeRef {.importc: "LLVMFunctionType".}
+proc struct_type*(elemTypes: ptr TypeRef, count: cuint, packed: LlvmBool): TypeRef {.importc: "LLVMStructType".}
 proc struct_create_named*(ctx: ContextRef, name: cstring): TypeRef {.importc: "LLVMStructCreateNamed".}
-proc struct_set_body*(ty: TypeRef, elem_types: ptr TypeRef, count: cuint, packed: LlvmBool) {.importc: "LLVMStructSetBody".}
-proc vector_type*(elem_type: TypeRef, count: cuint): TypeRef {.importc: "LLVMVectorType".}
+proc struct_set_body*(ty: TypeRef, elemTypes: ptr TypeRef, count: cuint, packed: LlvmBool) {.importc: "LLVMStructSetBody".}
+proc vector_type*(elemType: TypeRef, count: cuint): TypeRef {.importc: "LLVMVectorType".}
 proc llvm_type_of*(x: ValueRef): TypeRef {.importc: "LLVMTypeOf".}
 
 proc get_param*(fn: ValueRef, index: cuint): ValueRef {.importc: "LLVMGetParam".}
 proc get_undef*(ty: TypeRef): ValueRef {.importc: "LLVMGetUndef".}
 
-proc const_int*(ty: TypeRef, n: culonglong, sign_extend: LlvmBool): ValueRef {.importc: "LLVMConstInt".}
+proc const_int*(ty: TypeRef, n: culonglong, signExtend: LlvmBool): ValueRef {.importc: "LLVMConstInt".}
 proc const_real*(ty: TypeRef, n: cdouble): ValueRef {.importc: "LLVMConstReal".}
 proc const_struct*(vals: ptr ValueRef, count: cuint, packed: LlvmBool): ValueRef {.importc: "LLVMConstStruct".}
-proc const_array*(elem_type: TypeRef, vals: ptr ValueRef, length: cuint): ValueRef {.importc: "LLVMConstArray".}
+proc const_array*(elemType: TypeRef, vals: ptr ValueRef, length: cuint): ValueRef {.importc: "LLVMConstArray".}
 proc const_vector*(vals: ptr ValueRef, count: cuint): ValueRef {.importc: "LLVMConstVector".}
 
 proc build_add*(builder: BuilderRef, a, b: ValueRef, name: cstring): ValueRef {.importc: "LLVMBuildAdd".}
@@ -191,20 +191,20 @@ proc build_not*(builder: BuilderRef, a: ValueRef, name: cstring): ValueRef {.imp
 proc build_select*(builder: BuilderRef, cond, then, otherwise: ValueRef, name: cstring): ValueRef {.importc: "LLVMBuildSelect".}
 
 proc build_bit_cast*(builder: BuilderRef, a: ValueRef, dest: TypeRef, name: cstring): ValueRef {.importc: "LLVMBuildBitCast".}
-proc build_fp_to_ui*(builder: BuilderRef, val: ValueRef, dest_ty: TypeRef, name: cstring): ValueRef {.importc: "LLVMBuildFPToUI".}
-proc build_fp_to_si*(builder: BuilderRef, val: ValueRef, dest_ty: TypeRef, name: cstring): ValueRef {.importc: "LLVMBuildFPToSI".}
-proc build_ui_to_fp*(builder: BuilderRef, val: ValueRef, dest_ty: TypeRef, name: cstring): ValueRef {.importc: "LLVMBuildUIToFP".}
-proc build_si_to_fp*(builder: BuilderRef, val: ValueRef, dest_ty: TypeRef, name: cstring): ValueRef {.importc: "LLVMBuildSIToFP".}
+proc build_fp_to_ui*(builder: BuilderRef, val: ValueRef, destTy: TypeRef, name: cstring): ValueRef {.importc: "LLVMBuildFPToUI".}
+proc build_fp_to_si*(builder: BuilderRef, val: ValueRef, destTy: TypeRef, name: cstring): ValueRef {.importc: "LLVMBuildFPToSI".}
+proc build_ui_to_fp*(builder: BuilderRef, val: ValueRef, destTy: TypeRef, name: cstring): ValueRef {.importc: "LLVMBuildUIToFP".}
+proc build_si_to_fp*(builder: BuilderRef, val: ValueRef, destTy: TypeRef, name: cstring): ValueRef {.importc: "LLVMBuildSIToFP".}
 
-proc build_call*(builder: BuilderRef, fn: ValueRef, args: ptr ValueRef, num_args: cuint, name: cstring): ValueRef {.importc: "LLVMBuildCall".}
-proc build_call2*(builder: BuilderRef, ty: TypeRef, fn: ValueRef, args: ptr ValueRef, num_args: cuint, name: cstring): ValueRef {.importc: "LLVMBuildCall2".}
+proc build_call*(builder: BuilderRef, fn: ValueRef, args: ptr ValueRef, numArgs: cuint, name: cstring): ValueRef {.importc: "LLVMBuildCall".}
+proc build_call2*(builder: BuilderRef, ty: TypeRef, fn: ValueRef, args: ptr ValueRef, numArgs: cuint, name: cstring): ValueRef {.importc: "LLVMBuildCall2".}
 
 proc build_alloca*(builder: BuilderRef, ty: TypeRef, name: cstring): ValueRef {.importc: "LLVMBuildAlloca".}
 proc build_array_alloca*(builder: BuilderRef, ty: TypeRef, val: ValueRef, name: cstring): ValueRef {.importc: "LLVMBuildArrayAlloca".}
-proc build_load*(builder: BuilderRef, pointer_val: ValueRef, name: cstring): ValueRef {.importc: "LLVMBuildLoad".}
-proc build_load2*(builder: BuilderRef, ty: TypeRef, pointer_val: ValueRef, name: cstring): ValueRef {.importc: "LLVMBuildLoad2".}
-proc build_store*(builder: BuilderRef, val, pointer_val: ValueRef): ValueRef {.importc: "LLVMBuildStore".}
-proc build_gep2*(builder: BuilderRef, ty: TypeRef, pointer_val: ValueRef, indices: ptr ValueRef, num_indices: cuint, name: cstring): ValueRef {.importc: "LLVMBuildGEP2".}
+proc build_load*(builder: BuilderRef, pointerVal: ValueRef, name: cstring): ValueRef {.importc: "LLVMBuildLoad".}
+proc build_load2*(builder: BuilderRef, ty: TypeRef, pointerVal: ValueRef, name: cstring): ValueRef {.importc: "LLVMBuildLoad2".}
+proc build_store*(builder: BuilderRef, val, pointerVal: ValueRef): ValueRef {.importc: "LLVMBuildStore".}
+proc build_gep2*(builder: BuilderRef, ty: TypeRef, pointerVal: ValueRef, indices: ptr ValueRef, numIndices: cuint, name: cstring): ValueRef {.importc: "LLVMBuildGEP2".}
 
 proc build_ret*(builder: BuilderRef, ret: ValueRef): ValueRef {.importc: "LLVMBuildRet".}
 proc build_ret_void*(builder: BuilderRef): ValueRef {.importc: "LLVMBuildRetVoid".}
@@ -239,57 +239,57 @@ proc `$`*(value: TypeRef): string =
   result = $str
   dispose_message(str)
 
-proc function_type*(ret: TypeRef,
+proc functionType*(ret: TypeRef,
                     args: openArray[TypeRef],
-                    is_var_arg: bool = false): TypeRef =
+                    isVarArg: bool = false): TypeRef =
   if args.len > 0:
-    result = function_type(ret, args[0].unsafe_addr, cuint(args.len), cint(ord(is_var_arg)))
+    result = function_type(ret, args[0].unsafeAddr, cuint(args.len), cint(ord(isVarArg)))
   else:
-    result = function_type(ret, nil, cuint(args.len), cint(ord(is_var_arg)))
+    result = function_type(ret, nil, cuint(args.len), cint(ord(isVarArg)))
 
-proc struct_type*(elem_types: openArray[TypeRef], packed: bool = false): TypeRef =
-  struct_type(elem_types[0].unsafe_addr, cuint(elem_types.len), LlvmBool(ord(packed)))
+proc structType*(elemTypes: openArray[TypeRef], packed: bool = false): TypeRef =
+  struct_type(elemTypes[0].unsafeAddr, cuint(elemTypes.len), LlvmBool(ord(packed)))
 
-proc add_incoming*(phi: ValueRef,
+proc addIncoming*(phi: ValueRef,
                    vals: openArray[ValueRef],
                    blocks: openArray[BasicBlockRef]) =
   assert vals.len == blocks.len
   if vals.len > 0:
-    phi.add_incoming(vals[0].unsafe_addr, blocks[0].unsafe_addr, cuint(vals.len))
+    phi.add_incoming(vals[0].unsafeAddr, blocks[0].unsafeAddr, cuint(vals.len))
 
-proc build_call2*(builder: BuilderRef,
+proc buildCall2*(builder: BuilderRef,
                   typ: TypeRef,
                   fn: ValueRef,
                   args: openArray[ValueRef],
                   name: cstring): ValueRef =
-  var args_addr: ptr ValueRef = nil
+  var argsAddr: ptr ValueRef = nil
   if args.len > 0:
-    args_addr = args[0].unsafe_addr
-  result = builder.build_call2(typ, fn, args_addr, cuint(args.len), name)
+    argsAddr = args[0].unsafeAddr
+  result = builder.build_call2(typ, fn, argsAddr, cuint(args.len), name)
 
-proc build_gep2*(builder: BuilderRef,
+proc buildGep2*(builder: BuilderRef,
                  typ: TypeRef,
-                 pointer_val: ValueRef,
+                 pointerVal: ValueRef,
                  indices: openArray[ValueRef],
                  name: cstring): ValueRef =
   assert indices.len > 0
   
-  result = builder.build_gep2(typ, pointer_val,
-    indices[0].unsafe_addr, cuint(indices.len), name
+  result = builder.build_gep2(typ, pointerVal,
+    indices[0].unsafeAddr, cuint(indices.len), name
   )
 
-proc position_builder_at_start*(builder: BuilderRef,
-                                basic_block: BasicBlockRef) =
-  let instr = basic_block.get_first_instruction()
-  if instr.is_nil:
-    builder.position_builder_at_end(basic_block)
+proc positionBuilderAtStart*(builder: BuilderRef,
+                                basicBlock: BasicBlockRef) =
+  let instr = basicBlock.get_first_instruction()
+  if instr.isNil:
+    builder.position_builder_at_end(basicBlock)
   else:
     builder.position_builder_before(instr)
 
-proc const_int32*(x: int32): ValueRef =
+proc constInt32*(x: int32): ValueRef =
   const_int(int32_type(), cast[culonglong](clonglong(x)), 0)
 
-proc nim_int_type*(): TypeRef =
+proc nimIntType*(): TypeRef =
   when sizeof(int) == 8:
     return int64_type()
   elif sizeof(int) == 4:
@@ -301,52 +301,52 @@ proc nim_int_type*(): TypeRef =
   else:
     error("Unknown nim int size: " & $sizeof(int))
 
-proc const_nim_int*(x: int): ValueRef =
-  const_int(nim_int_type(), cast[culonglong](clonglong(x)), 0)
+proc constNimInt*(x: int): ValueRef =
+  const_int(nimIntType(), cast[culonglong](clonglong(x)), 0)
 
-template define_build_icmp(build_name: untyped, pred: static[IntPredicate]) =
+template defineBuildIcmp(buildName: untyped, pred: static[IntPredicate]) =
   proc build_name*(builder: BuilderRef, a, b: ValueRef, name: cstring): ValueRef =
     result = builder.build_icmp(pred, a, b, name)
 
-define_build_icmp(build_icmp_eq, IntEq)
-define_build_icmp(build_icmp_ne, IntNe)
-define_build_icmp(build_icmp_slt, IntSLt)
-define_build_icmp(build_icmp_sle, IntSLe)
+defineBuildIcmp(buildIcmpEq, IntEq)
+defineBuildIcmp(buildIcmpNe, IntNe)
+defineBuildIcmp(buildIcmpSlt, IntSLt)
+defineBuildIcmp(buildIcmpSle, IntSLe)
 
-template define_build_fcmp(build_name: untyped, pred: static[RealPredicate]) =
+template defineBuildFcmp(buildName: untyped, pred: static[RealPredicate]) =
   proc build_name*(builder: BuilderRef, a, b: ValueRef, name: cstring): ValueRef =
     result = builder.build_fcmp(pred, a, b, name)
 
-define_build_fcmp(build_fcmp_oeq, RealOEq)
-define_build_fcmp(build_fcmp_one, RealONe)
-define_build_fcmp(build_fcmp_olt, RealOLt)
-define_build_fcmp(build_fcmp_ole, RealOLe)
+defineBuildFcmp(buildFcmpOeq, RealOEq)
+defineBuildFcmp(buildFcmpOne, RealONe)
+defineBuildFcmp(buildFcmpOlt, RealOLt)
+defineBuildFcmp(buildFcmpOle, RealOLe)
 
-proc build_negate*(builder: BuilderRef, x: ValueRef, name: cstring): ValueRef =
+proc buildNegate*(builder: BuilderRef, x: ValueRef, name: cstring): ValueRef =
   result = builder.build_sub(
     const_int(llvm_type_of(x), culonglong(0), 0), x, name
   )
 
-proc build_fnegate*(builder: BuilderRef, x: ValueRef, name: cstring): ValueRef =
+proc buildFnegate*(builder: BuilderRef, x: ValueRef, name: cstring): ValueRef =
   result = builder.build_fsub(
     const_real(llvm_type_of(x), 0), x, name
   )
 
-proc get_md_kind_id*(name: string): cuint =
+proc getMdKindId*(name: string): cuint =
   get_md_kind_id(cstring(name), cuint(len(name)))
 
-proc md_string_in_context2*(ctx: ContextRef, str: string): MetadataRef =
+proc mdStringInContext2*(ctx: ContextRef, str: string): MetadataRef =
   result = ctx.md_string_in_context2(cstring(str), csize_t(len(str)))
 
-proc md_node_in_context2*(ctx: ContextRef, children: openArray[MetadataRef]): MetadataRef =
+proc mdNodeInContext2*(ctx: ContextRef, children: openArray[MetadataRef]): MetadataRef =
   if children.len == 0:
     result = ctx.md_node_in_context2(nil, 0)
   else:
     result = ctx.md_node_in_context2(
-      children[0].unsafe_addr, csize_t(children.len)
+      children[0].unsafeAddr, csize_t(children.len)
     )
 
-proc create_string_attribute*(key, val: string): AttributeRef =
+proc createStringAttribute*(key, val: string): AttributeRef =
   result = create_string_attribute(get_global_context(),
     key.cstring, cuint(key.len),
     val.cstring, cuint(val.len)
@@ -361,37 +361,37 @@ proc parse_bitcode2*(mem: MemoryBufferRef, module: ptr ModuleRef): LlvmBool {.im
 proc parse_bitcode_in_context2*(ctx: ContextRef, mem: MemoryBufferRef, module: ptr ModuleRef): LlvmBool {.importc: "LLVMParseBitcodeInContext2".}
 {.pop.}
 
-proc save_bitcode*(module: ModuleRef, path: string) =
+proc saveBitcode*(module: ModuleRef, path: string) =
   module.write_bitcode_to_file(path)
 
-proc load_bitcode*(ctx: ContextRef, path: string): ModuleRef =
+proc loadBitcode*(ctx: ContextRef, path: string): ModuleRef =
   var
     msg: cstring = nil
     mem: MemoryBufferRef = nil
   defer:
-    if not msg.is_nil:
+    if not msg.isNil:
       msg.dispose_message()
-    if not mem.is_nil:
+    if not mem.isNil:
       mem.dispose_memory_buffer()
   if create_memory_buffer_with_contents_of_file(path.cstring, mem.addr, msg.addr) != 0:
-    raise new_exception(IoError, $msg)
-  if parse_bitcode_in_context2(ctx, mem, result.addr) != 0 or result.is_nil:
-    raise new_exception(ValueError, "Failed to parse module from " & path)
+    raise newException(IOError, $msg)
+  if parse_bitcode_in_context2(ctx, mem, result.addr) != 0 or result.isNil:
+    raise newException(ValueError, "Failed to parse module from " & path)
 
-proc load_bitcode*(path: string): ModuleRef =
-  get_global_context().load_bitcode(path)
+proc loadBitcode*(path: string): ModuleRef =
+  get_global_context().loadBitcode(path)
 
 type VerifierFailureAction* = enum
   AbortProcessAction, PrintMessageAction, ReturnStatusAction
 
 {.push header: "<llvm-c/Analysis.h>".}
-proc verify_module*(module: ModuleRef, failure_action: VerifierFailureAction, msg: ptr cstring): LlvmBool {.importc: "LLVMVerifyModule".}
-proc verify_function*(module: ModuleRef, failure_action: VerifierFailureAction): LlvmBool {.importc: "LLVMVerifyFunction".}
+proc verify_module*(module: ModuleRef, failureAction: VerifierFailureAction, msg: ptr cstring): LlvmBool {.importc: "LLVMVerifyModule".}
+proc verify_function*(module: ModuleRef, failureAction: VerifierFailureAction): LlvmBool {.importc: "LLVMVerifyFunction".}
 {.pop.}
 
 {.push header: "<llvm-c/ExecutionEngine.h>".}
 proc create_execution_engine_for_module*(engine: ptr ExecutionEngineRef, module: ModuleRef, err: ptr cstring): cint {.importc: "LLVMCreateExecutionEngineForModule".}
-proc create_jit_compiler_for_module*(engine: ptr ExecutionEngineRef, module: ModuleRef, opt_level: cuint, err: ptr cstring): cint {.importc: "LLVMCreateJITCompilerForModule".}
+proc create_jit_compiler_for_module*(engine: ptr ExecutionEngineRef, module: ModuleRef, optLevel: cuint, err: ptr cstring): cint {.importc: "LLVMCreateJITCompilerForModule".}
 proc dispose_execution_engine*(engine: ExecutionEngineRef) {.importc: "LLVMDisposeExecutionEngine".}
 proc get_function_address*(engine: ExecutionEngineRef, name: cstring): pointer {.importc: "LLVMGetFunctionAddress".}
 proc add_global_mapping*(engine: ExecutionEngineRef, global: ValueRef, address: pointer) {.importc: "LLVMAddGlobalMapping".}
@@ -399,7 +399,7 @@ proc link_in_mcjit*() {.importc: "LLVMLinkInMCJIT".}
 proc get_execution_engine_target_data*(engine: ExecutionEngineRef): TargetDataRef {.importc: "LLVMGetExecutionEngineTargetData".}
 {.pop.}
 
-proc get_function_address*[T](engine: ExecutionEngineRef, name: string): T =
+proc getFunctionAddress*[T](engine: ExecutionEngineRef, name: string): T =
   cast[T](get_function_address(engine, name.cstring))
 
 {.push header: "<llvm-c/Target.h>".}
@@ -437,15 +437,15 @@ proc set_size_level*(builder: PassManagerBuilderRef, level: cuint) {.importc: "L
 
 proc populate_function_pass_manager*(builder: PassManagerBuilderRef, manager: PassManagerRef) {.importc: "LLVMPassManagerBuilderPopulateFunctionPassManager".}
 proc populate_module_pass_manager*(builder: PassManagerBuilderRef, manager: PassManagerRef) {.importc: "LLVMPassManagerBuilderPopulateModulePassManager".}
-proc populate_lto_pass_manager*(builder: PassManagerBuilderRef, manager: PassManagerRef, internalize, run_inliner: LlvmBool) {.importc: "LLVMPassManagerBuilderPopulateLTOPassManager".}
+proc populate_lto_pass_manager*(builder: PassManagerBuilderRef, manager: PassManagerRef, internalize, runInliner: LlvmBool) {.importc: "LLVMPassManagerBuilderPopulateLTOPassManager".}
 proc create_pass_manager_builder*(): PassManagerBuilderRef {.importc: "LLVMPassManagerBuilderCreate".}
 proc dispose_pass_manager_builder*(builder: PassManagerBuilderRef) {.importc: "LLVMPassManagerBuilderDispose".}
 {.pop.}
 
-proc `opt_level=`*(builder: PassManagerBuilderRef, level: int) =
+proc `optLevel=`*(builder: PassManagerBuilderRef, level: int) =
   builder.set_opt_level(cuint(level))
 
-proc `size_level=`*(builder: PassManagerBuilderRef, level: int) =
+proc `sizeLevel=`*(builder: PassManagerBuilderRef, level: int) =
   builder.set_size_level(cuint(level))
 
 {.push header: "<llvm-c/Initialization.h>".}
@@ -485,12 +485,12 @@ when defined(exprgrad_fast_math):
   proc enable_fast_math*(builder: BuilderRef) {.importc: "LLVMBuilderEnableFastMath".}
 else:
   {.warning: "Please compile the file exprgrad/wrappers/llvm_ext.cpp and pass -d:exprgrad_fast_math to enable fast floating point math.".}
-  proc enable_fast_math*(builder: BuilderRef) = discard
+  proc enableFastMath*(builder: BuilderRef) = discard
 
-when is_main_module:
+when isMainModule:
   let
     module = module_create_with_name("my_module")
-    sum = add_function(module, "sum", function_type(int32_type(), [
+    sum = add_function(module, "sum", functionType(int32_type(), [
       int32_type(), int32_type()
     ]))
     entry = sum.append_basic_block("entry")
@@ -520,8 +520,8 @@ when is_main_module:
     err.dispose_message()
     quit ""
   
-  let my_func = get_function_address[proc (a, b: cint): cint {.noconv.}](engine, "sum")
-  echo my_func(1, 2)
+  let myFunc = getFunctionAddress[proc (a, b: cint): cint {.noconv.}](engine, "sum")
+  echo myFunc(1, 2)
   
   dispose_builder(builder)
   dispose_execution_engine(engine)

@@ -35,7 +35,7 @@ type
     data: seq[ThreadData]
     open: seq[int]
 
-proc thread_handler(data: ThreadData) {.gcsafe.} =
+proc threadHandler(data: ThreadData) {.gcsafe.} =
   while true:
     let task = data.tasks[].recv()
     try:
@@ -45,21 +45,21 @@ proc thread_handler(data: ThreadData) {.gcsafe.} =
       continue
     data.done[].send(true)
 
-proc alloc_channel[T](): ptr Channel[T] =
-  result = cast[ptr Channel[T]](alloc_shared0(sizeof(Channel[T])))
+proc allocChannel[T](): ptr Channel[T] =
+  result = cast[ptr Channel[T]](allocShared0(sizeof(Channel[T])))
   result[].open()
 
-proc init_thread_pool(): ThreadPool =
-  result.threads = new_seq[Thread[ThreadData]](count_processors())
-  result.open = new_seq[int](result.threads.len)
+proc initThreadPool(): ThreadPool =
+  result.threads = newSeq[Thread[ThreadData]](countProcessors())
+  result.open = newSeq[int](result.threads.len)
   for it, thread in result.threads.mpairs:
     let data = ThreadData(
-      tasks: alloc_channel[Task](),
-      done: alloc_channel[bool]()
+      tasks: allocChannel[Task](),
+      done: allocChannel[bool]()
     )
     result.data.add(data)
-    create_thread(thread, thread_handler, data)
-    thread.pin_to_cpu(it)
+    createThread(thread, threadHandler, data)
+    thread.pinToCpu(it)
 
 proc len*(pool: ThreadPool): int = pool.threads.len
 
@@ -76,4 +76,4 @@ proc join*(pool: var ThreadPool) =
   for it in 0..<pool.len:
     pool.join(it)
 
-var thread_pool* = init_thread_pool()
+var threadPool* = initThreadPool()

@@ -14,7 +14,7 @@
 
 # Intermediate representation for exprgrad
 
-import std/[macros, tables, sets, hashes]
+import std/[macros, tables, sets, hashes, strutils]
 
 type
   CompilerError* = ref object of CatchableError
@@ -28,7 +28,7 @@ type
   ValidationError* = ref object of CompilerError
 
 const
-  TARGET_SUPPORTS_THREADS* = compile_option("threads")
+  TARGET_SUPPORTS_THREADS* = compileOption("threads")
   TARGET_SUPPORTS_GPU* = defined(opencl)
 
 type
@@ -89,23 +89,23 @@ type
     tensor*: TensorId
     body*: seq[Instr]
     case kind*: InstrKind:
-      of InstrIndex: index_lit*: int
-      of InstrScalar: scalar_lit*: float64
-      of InstrBoolean: boolean_lit*: bool
+      of InstrIndex: indexLit*: int
+      of InstrScalar: scalarLit*: float64
+      of InstrBoolean: booleanLit*: bool
       of InstrShape: dim*: int
       of InstrLoop:
-        loop_iter*: RegId
-        loop_step*: int
-        loop_fuse_next*: bool
+        loopIter*: RegId
+        loopStep*: int
+        loopFuseNext*: bool
       of InstrThreads:
-        threads_closure*: ParallelClosure
-        threads_begin*: RegId
-        threads_end*: RegId
+        threadsClosure*: ParallelClosure
+        threadsBegin*: RegId
+        threadsEnd*: RegId
       of InstrGpu:
-        gpu_closure*: ParallelClosure
-        gpu_indices*: seq[GpuIndex]
+        gpuClosure*: ParallelClosure
+        gpuIndices*: seq[GpuIndex]
       of InstrSharedCache:
-        cache_size*: int
+        cacheSize*: int
       else: discard
   
   Register* = object
@@ -127,25 +127,25 @@ type
     cache*: bool
   
   LoopSchedule* = object
-    tile_size*: int
+    tileSize*: int
     tile*: bool
     parallel*: bool
-    share_cache*: bool
+    shareCache*: bool
   
   Loop* = object
     iter*: RegId
-    local_offset*: RegId
-    tile_offset*: RegId
+    localOffset*: RegId
+    tileOffset*: RegId
     mode*: LoopMode
     
-    has_bounds*: bool
+    hasBounds*: bool
     start*: LinearIndex
     stop*: LinearIndex
     step*: int
     
     cache*: seq[Instr]
     
-    fuse_next*: bool
+    fuseNext*: bool
     schedule*: LoopSchedule
   
   Interval* = object
@@ -165,7 +165,7 @@ type
   TensorOpKind* = enum OpRead, OpWrite
   TensorOp* = object
     tensor*: TensorId
-    is_raw*: bool
+    isRaw*: bool
     dims*: seq[LinearIndex]
     data*: RegId
     cache*: LocalCache
@@ -195,7 +195,7 @@ type
       else: discard
   
   KernelGradient* = object
-    case is_custom*: bool:
+    case isCustom*: bool:
       of true:
         tensors*: Table[TensorId, TensorId]
         kernels*: seq[Kernel]
@@ -221,7 +221,7 @@ type
     tensors*: HashSet[TensorId]
     shapes*: seq[ShapeConstraint]
     kernels*: seq[Kernel]
-    compile_target*: CompileTarget
+    compileTarget*: CompileTarget
   
   TensorKind* = enum
     TensorResult, TensorInput, TensorParam, TensorCache, TensorRandom
@@ -230,8 +230,8 @@ type
     shape*: seq[int]
     name*: string
     case kind*: TensorKind:
-      of TensorParam: init_range*: HSlice[float64, float64]
-      of TensorRandom: random_range*: HSlice[float64, float64]
+      of TensorParam: initRange*: HSlice[float64, float64]
+      of TensorRandom: randomRange*: HSlice[float64, float64]
       of TensorCache: cache*: TensorId
       else: discard
   
@@ -261,7 +261,7 @@ type
     caches*: seq[TensorId]
     targets*: Table[string, Target]
     stages*: set[Stage]
-    scalar_type*: ScalarType
+    scalarType*: ScalarType
 
 const
   SIDE_EFFECT_INSTRS* = {
@@ -280,38 +280,38 @@ const
 proc `<`*(a, b: LoopMode): bool = ord(a) < ord(b)
 proc `<=`*(a, b: LoopMode): bool = ord(a) <= ord(b)
 
-template define_id(Id, Obj: untyped, name, type_name: static[string]) =
-  proc `==`*(a, b: Id): bool {.borrow.}
-  proc hash*(id: Id): Hash {.borrow.}
+template defineId(idType, objType: untyped, name, typeName: static[string]) =
+  proc `==`*(a, b: idType): bool {.borrow.}
+  proc hash*(id: idType): Hash {.borrow.}
   
-  proc `[]`*[T](objs: seq[T], id: Id): T = objs[int(id) - 1]
-  proc `[]`*[T](objs: var seq[T], id: Id): var T = objs[int(id) - 1]
-  proc `[]=`*[T](objs: var seq[T], id: Id, obj: T) = objs[int(id) - 1] = obj
+  proc `[]`*[T](objs: seq[T], id: idType): T = objs[int(id) - 1]
+  proc `[]`*[T](objs: var seq[T], id: idType): var T = objs[int(id) - 1]
+  proc `[]=`*[T](objs: var seq[T], id: idType, obj: T) = objs[int(id) - 1] = obj
   
-  proc `$`*(id: Id): string =
+  proc `$`*(id: idType): string =
     if int(id) == 0:
-      result = "no_" & name
+      result = "no" & capitalizeAscii(name)
     else:
       result = name & $(int(id) - 1)
   
-  proc alloc*(objs: var seq[Obj], obj: Obj): Id =
-    result = Id(objs.len + 1)
+  proc alloc*(objs: var seq[objType], obj: objType): idType =
+    result = idType(objs.len + 1)
     objs.add(obj)
   
-  proc alloc*(objs: var seq[Obj]): Id =
-    result = Id(objs.len + 1)
-    objs.add(Obj())
+  proc alloc*(objs: var seq[objType]): idType =
+    result = idType(objs.len + 1)
+    objs.add(objType())
   
-  proc new_lit*(id: Id): NimNode =
-    new_call(bind_sym(type_name), new_lit(int(id)))
+  proc newLit*(id: idType): NimNode =
+    newCall(bindSym(typeName), newLit(int(id)))
 
-define_id(KernelId, Kernel, "kernel", "KernelId")
-define_id(RegId, Register, "reg", "RegId")
-define_id(TensorId, TensorDef, "tensor", "TensorId")
-define_id(LoopId, Loop, "loop", "LoopId")
+defineId(KernelId, Kernel, "kernel", "KernelId")
+defineId(RegId, Register, "reg", "RegId")
+defineId(TensorId, TensorDef, "tensor", "TensorId")
+defineId(LoopId, Loop, "loop", "LoopId")
 
 proc `$`*(typ: Type): string =
-  if typ.is_nil:
+  if typ.isNil:
     return "nil"
   result = ($typ.kind)[len("Type")..^1]
   case typ.kind:
@@ -322,9 +322,9 @@ proc `$`*(typ: Type): string =
     result &= ":" & $typ.count
 
 proc `==`*(a, b: Type): bool =
-  if a.is_nil and b.is_nil:
+  if a.isNil and b.isNil:
     result = true
-  elif not a.is_nil and not b.is_nil and
+  elif not a.isNil and not b.isNil and
        a.kind == b.kind and a.count == b.count:
     case a.kind:
       of TypeIndex, TypeScalar, TypeBoolean:
@@ -337,18 +337,18 @@ proc `==`*(a, b: Instr): bool =
     result = a.args == b.args and a.res == b.res and a.tensor == b.tensor
     if result:
       case a.kind:
-        of InstrIndex: result = a.index_lit == b.index_lit
-        of InstrScalar: result = a.scalar_lit == b.scalar_lit
-        of InstrBoolean: result = a.boolean_lit == b.boolean_lit
+        of InstrIndex: result = a.indexLit == b.indexLit
+        of InstrScalar: result = a.scalarLit == b.scalarLit
+        of InstrBoolean: result = a.booleanLit == b.booleanLit
         of InstrShape: result = a.dim == b.dim
         else: discard
 
 proc hash*(instr: Instr): Hash =
   result = hash(instr.kind) !& hash(instr.args) !& hash(instr.tensor) !& hash(instr.res)
   case instr.kind:
-    of InstrIndex: result = result !& hash(instr.index_lit)
-    of InstrScalar: result = result !& hash(instr.scalar_lit)
-    of InstrBoolean: result = result !& hash(instr.boolean_lit)
+    of InstrIndex: result = result !& hash(instr.indexLit)
+    of InstrScalar: result = result !& hash(instr.scalarLit)
+    of InstrBoolean: result = result !& hash(instr.booleanLit)
     of InstrShape: result = result !& hash(instr.dim)
     else: discard
   result = !$result
@@ -374,10 +374,10 @@ proc substitute*(instrs: var seq[Instr], subs: Table[RegId, RegId]) =
       instr.body.substitute(subs)
     
     case instr.kind:
-      of InstrLoop: sub(instr.loop_iter)
+      of InstrLoop: sub(instr.loopIter)
       of InstrThreads:
-        sub(instr.threads_begin)
-        sub(instr.threads_end)
+        sub(instr.threadsBegin)
+        sub(instr.threadsEnd)
       else: discard
 
 proc substitute*(expr: var Expr, subs: Table[RegId, RegId]) =  
@@ -387,13 +387,13 @@ proc substitute*(expr: var Expr, subs: Table[RegId, RegId]) =
 
 proc substitute*(index: var LinearIndex, subs: Table[RegId, RegId]) =  
   index.setup.substitute(subs)
-  var new_factors = init_table[RegId, int]()
+  var newFactors = initTable[RegId, int]()
   for reg, factor in index.factors:
     if reg in subs:
-      new_factors[subs[reg]] = factor
+      newFactors[subs[reg]] = factor
     else:
-      new_factors[reg] = factor
-  index.factors = new_factors
+      newFactors[reg] = factor
+  index.factors = newFactors
 
 proc substitute*(op: var TensorOp, subs: Table[RegId, RegId]) =
   for dim in op.dims.mitems:
@@ -402,8 +402,8 @@ proc substitute*(op: var TensorOp, subs: Table[RegId, RegId]) =
     op.data = subs[op.data]
 
 proc clone*(grad: KernelGradient): KernelGradient =
-  result = KernelGradient(is_custom: grad.is_custom)
-  if grad.is_custom:
+  result = KernelGradient(isCustom: grad.isCustom)
+  if grad.isCustom:
     result.tensors = grad.tensors
     result.subs = grad.subs
     for kernel in grad.kernels:
@@ -428,7 +428,7 @@ proc clone*(target: Target): Target =
     output: target.output,
     tensors: target.tensors,
     shapes: target.shapes,
-    compile_target: target.compile_target
+    compileTarget: target.compileTarget
   )
   for kernel in target.kernels:
     result.kernels.add(kernel.clone())
@@ -440,7 +440,7 @@ proc clone*(program: Program): Program =
     params: program.params,
     caches: program.caches,
     stages: program.stages,
-    scalar_type: program.scalar_type
+    scalarType: program.scalarType
   )
   for name, target in program.targets:
     result.targets[name] = target.clone()
@@ -466,7 +466,7 @@ proc substitute*(op: var TensorOp, subs: Table[TensorId, TensorId]) =
 proc substitute*(kernel: Kernel, subs: Table[TensorId, TensorId])
 
 proc substitute*(grad: var KernelGradient, subs: Table[TensorId, TensorId]) =
-  if grad.is_custom:
+  if grad.isCustom:
     if grad.subs.len > 0:
       for a, b in grad.subs:
         if b in subs:
@@ -493,9 +493,9 @@ proc substitute*(shape: var ShapeConstraint, subs: Table[TensorId, TensorId]) =
       for dim in shape.dims.mitems:
         dim.substitute(subs)
     of ShapeLinear:
-      var reads = init_table[TensorId, seq[seq[LinearIndex]]]()
-      for initial_tensor, dims in shape.reads:
-        var tensor = initial_tensor
+      var reads = initTable[TensorId, seq[seq[LinearIndex]]]()
+      for initialTensor, dims in shape.reads:
+        var tensor = initialTensor
         if tensor in subs:
           tensor = subs[tensor]
         reads[tensor] = dims
@@ -507,34 +507,34 @@ proc substitute*(shape: var ShapeConstraint, subs: Table[TensorId, TensorId]) =
       if shape.src in subs:
         shape.src = subs[shape.src]
 
-iterator tensor_ops*(kernel: Kernel): (TensorOpKind, TensorOp) =
+iterator tensorOps*(kernel: Kernel): (TensorOpKind, TensorOp) =
   for read in kernel.reads:
     yield (OpRead, read)
   yield (OpWrite, kernel.write)
 
-proc new_lit*[K, V](tab: Table[K, V]): NimNode =
-  result = new_tree(nnkStmtListExpr)
-  let tab_sym = gensym(nskVar, "tab")
-  result.add(new_var_stmt(tab_sym, new_call(new_tree(nnkBracketExpr, [
-    bind_sym("init_table"), get_type_inst(K), get_type_inst(V)
+proc newLit*[K, V](tab: Table[K, V]): NimNode =
+  result = newTree(nnkStmtListExpr)
+  let tabSym = genSym(nskVar, "tab")
+  result.add(newVarStmt(tabSym, newCall(newTree(nnkBracketExpr, [
+    bindSym("initTable"), getTypeInst(K), getTypeInst(V)
   ]))))
   for key, value in tab.pairs:
-    result.add(new_call(bind_sym("[]="), [
-      tab_sym, new_lit(key), new_lit(value)
+    result.add(newCall(bindSym("[]="), [
+      tabSym, newLit(key), newLit(value)
     ]))
-  result.add(tab_sym)
+  result.add(tabSym)
 
-proc new_lit*[T](hash_set: HashSet[T]): NimNode =
-  result = new_tree(nnkStmtListExpr)
-  let hash_set_sym = gensym(nskVar, "hash_set")
-  result.add(new_var_stmt(hash_set_sym, new_call(new_tree(nnkBracketExpr, [
-    bind_sym("init_hash_set"), get_type_inst(T)
+proc newLit*[T](hashSet: HashSet[T]): NimNode =
+  result = newTree(nnkStmtListExpr)
+  let hashSetSym = genSym(nskVar, "hashSet")
+  result.add(newVarStmt(hashSetSym, newCall(newTree(nnkBracketExpr, [
+    bindSym("initHashSet"), getTypeInst(T)
   ]))))
-  for value in hash_set:
-    result.add(new_call(bind_sym("incl"), [
-      hash_set_sym, new_lit(value)
+  for value in hashSet:
+    result.add(newCall(bindSym("incl"), [
+      hashSetSym, newLit(value)
     ]))
-  result.add(hash_set_sym)
+  result.add(hashSetSym)
 
 # Stages
 
@@ -544,26 +544,26 @@ const ALL_STAGES*: set[Stage] = block:
     stages.incl(stage)
   stages
 
-proc assert_pass*(program: Program,
-                  name: string,
-                  requires: set[Stage] = {},
-                  produces: set[Stage] = {},
-                  preserves: set[Stage] = {}) =
+proc assertPass*(program: Program,
+                 name: string,
+                 requires: set[Stage] = {},
+                 produces: set[Stage] = {},
+                 preserves: set[Stage] = {}) =
   for stage in requires:
     if stage notin program.stages:
       raise StageError(msg: "Pass " & name & " requires " & $stage & ", but only stages " & $program.stages & " are available")
   program.stages = program.stages * preserves + produces
 
-proc assert_gen*(program: Program,
-                 name: string,
-                 requires: set[Stage] = {}) =
+proc assertGen*(program: Program,
+                name: string,
+                requires: set[Stage] = {}) =
   for stage in requires:
     if stage notin program.stages:
       raise StageError(msg: "Generator " & name & " requires stage " & $stage & ", but only stages " & $program.stages & " are available.")
 
-proc assert_analysis*(program: Program,
-                      name: string,
-                      requires: set[Stage] = {}) =
+proc assertAnalysis*(program: Program,
+                     name: string,
+                     requires: set[Stage] = {}) =
   for stage in requires:
     if stage notin program.stages:
       raise StageError(msg: "Analysis " & name & " requires stage " & $stage & ", but only stages " & $program.stages & " are available.")
@@ -571,11 +571,11 @@ proc assert_analysis*(program: Program,
 
 # LinearIndex arithmetic
 
-proc init_linear_index*(constant: int): LinearIndex =
+proc initLinearIndex*(constant: int): LinearIndex =
   result = LinearIndex(constant: constant)
 
-proc init_linear_index*(reg: RegId): LinearIndex =
-  result = LinearIndex(factors: to_table({reg: 1}))
+proc initLinearIndex*(reg: RegId): LinearIndex =
+  result = LinearIndex(factors: toTable({reg: 1}))
 
 proc `*`*(a: LinearIndex, b: int): LinearIndex =
   if b != 0:
@@ -605,7 +605,7 @@ proc `*`*(a, b: LinearIndex): LinearIndex =
   elif b.factors.len == 0:
     result = a * b.constant
   else:
-    raise new_exception(ValueError, "")
+    raise newException(ValueError, "")
 
 proc `-`*(a: LinearIndex, b: int): LinearIndex =
   result = a

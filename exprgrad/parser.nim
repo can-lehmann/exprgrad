@@ -30,13 +30,13 @@ type
         iter*: string
       of ExprInstr:
         case instr*: InstrKind:
-          of InstrIndex: index_lit*: int
-          of InstrScalar: scalar_lit*: float64
-          of InstrBoolean: boolean_lit*: bool
+          of InstrIndex: indexLit*: int
+          of InstrScalar: scalarLit*: float64
+          of InstrBoolean: booleanLit*: bool
           of InstrShape: dim*: int
           else: discard
       of ExprRead:
-        is_raw*: bool
+        isRaw*: bool
       else: discard
   
   Scalar* = distinct ExprBuilder
@@ -51,11 +51,11 @@ type
   KernelBuilder = ref object
     target: Fun
     dims: seq[Index]
-    is_raw: bool
+    isRaw: bool
     value: Scalar
-    has_custom_grad: bool
+    hasCustomGrad: bool
     grads: seq[KernelBuilder]
-    block_count: int
+    blockCount: int
     schedules: array[CompileTarget, Schedule]
   
   ShapeConstraintBuilder* = object
@@ -77,35 +77,35 @@ type
     locked*: bool
     case kind: FunKind:
       of FunInput:
-        input_shape: seq[int]
+        inputShape: seq[int]
       of FunParam:
-        param_shape: seq[int]
-        init_range: HSlice[float64, float64]
+        paramShape: seq[int]
+        initRange: HSlice[float64, float64]
       of FunCache: cache: Fun
-      of FunRandom: random_range: HSlice[float64, float64]
+      of FunRandom: randomRange: HSlice[float64, float64]
       of FunResult, FunEffect:
         kernels: seq[KernelBuilder]
-        shape_constr: ShapeConstraintBuilder
+        shapeConstr: ShapeConstraintBuilder
         effect: Fun
       of FunReshape: reshape: seq[int]
       of FunCond:
         cond: Table[string, Fun]
-        cond_else: Fun
+        condElse: Fun
       of FunTarget:
-        compile_target: CompileTarget
+        compileTarget: CompileTarget
       of FunBackwards, FunGradient, FunMultiple, FunGradientArg:
         discard
 
 proc hash*(fun: Fun): Hash = hash(fun[].addr)
 
 proc literal*(value: bool): Boolean =
-  result = Boolean(ExprBuilder(kind: ExprInstr, instr: InstrBoolean, boolean_lit: value))
+  result = Boolean(ExprBuilder(kind: ExprInstr, instr: InstrBoolean, booleanLit: value))
 
 proc literal*(value: int): Index =
-  result = Index(ExprBuilder(kind: ExprInstr, instr: InstrIndex, index_lit: value))
+  result = Index(ExprBuilder(kind: ExprInstr, instr: InstrIndex, indexLit: value))
 
 proc literal*(value: float): Scalar =
-  result = Scalar(ExprBuilder(kind: ExprInstr, instr: InstrScalar, scalar_lit: value))
+  result = Scalar(ExprBuilder(kind: ExprInstr, instr: InstrScalar, scalarLit: value))
 
 proc literal*(value: Index): Index = value
 proc literal*(value: Scalar): Scalar = value
@@ -118,29 +118,29 @@ proc literal*[T](arr: openArray[T]): auto =
     builder.children.add(ExprBuilder(literal(value)))
   result = Array[typeof(literal(arr[0]))](builder)
 
-proc iterator_literal*(name: string, start: Index = nil, stop: Index = nil): Index =
+proc iteratorLiteral*(name: string, start: Index = nil, stop: Index = nil): Index =
   result = Index(ExprBuilder(kind: ExprIter,
-    iter: name.nim_ident_normalize()
+    iter: name.nimIdentNormalize()
   ))
-  if not ExprBuilder(start).is_nil or not ExprBuilder(stop).is_nil:
+  if not ExprBuilder(start).isNil or not ExprBuilder(stop).isNil:
     ExprBuilder(result).children = @[ExprBuilder(start), ExprBuilder(stop)]
 
 type BuildContext = object
   kernel: Kernel
   iters: Table[string, RegId]
   grads: Table[TensorId, TensorId]
-  block_count: int
-  max_tensor: TensorId
+  blockCount: int
+  maxTensor: TensorId
   schedule: Schedule
-  compile_target: CompileTarget
+  compileTarget: CompileTarget
 
-proc alloc_block(ctx: var BuildContext): int =
-  result = ctx.block_count
-  ctx.block_count += 1
+proc allocBlock(ctx: var BuildContext): int =
+  result = ctx.blockCount
+  ctx.blockCount += 1
 
-proc lookup_tensor(ctx: var BuildContext, fun: Fun): TensorId =
+proc lookupTensor(ctx: var BuildContext, fun: Fun): TensorId =
   if fun.kind == FunGradientArg:
-    let id = ctx.lookup_tensor(fun.children[0])
+    let id = ctx.lookupTensor(fun.children[0])
     if id notin ctx.grads:
       ctx.grads[id] = TensorId(-ctx.grads.len - 1)
     result = ctx.grads[id]
@@ -149,23 +149,23 @@ proc lookup_tensor(ctx: var BuildContext, fun: Fun): TensorId =
 
 proc build*(builder: ExprBuilder,
             instrs: var seq[Instr],
-            block_id: int,
+            blockId: int,
             ctx: var BuildContext): RegId
 
-proc build_linear_index*(builder: ExprBuilder, ctx: var BuildContext): LinearIndex =
-  let reg = builder.build(result.setup, ctx.alloc_block(), ctx)
-  result.factors = to_table({reg: 1})
+proc buildLinearIndex*(builder: ExprBuilder, ctx: var BuildContext): LinearIndex =
+  let reg = builder.build(result.setup, ctx.allocBlock(), ctx)
+  result.factors = toTable({reg: 1})
 
 proc build*(builder: ExprBuilder,
             instrs: var seq[Instr],
-            block_id: int,
+            blockId: int,
             ctx: var BuildContext): RegId =
-  if block_id notin builder.res:
+  if blockId notin builder.res:
     case builder.kind:
       of ExprRead:
         var dims: seq[LinearIndex] = @[]
         for dim in builder.children:
-          dims.add(dim.build_linear_index(ctx))
+          dims.add(dim.buildLinearIndex(ctx))
         
         var schedule = DEFAULT_TENSOR_SCHEDULE
         if builder.tensor in ctx.schedule.tensors:
@@ -173,13 +173,13 @@ proc build*(builder: ExprBuilder,
         
         let res = ctx.kernel.regs.alloc()
         ctx.kernel.reads.add(TensorOp(
-          tensor: ctx.lookup_tensor(builder.tensor),
-          is_raw: builder.is_raw,
+          tensor: ctx.lookupTensor(builder.tensor),
+          isRaw: builder.isRaw,
           dims: dims,
           data: res,
           schedule: schedule
         ))
-        builder.res[block_id] = res
+        builder.res[blockId] = res
       of ExprIter:
         if builder.iter notin ctx.iters:
           let reg = ctx.kernel.regs.alloc()
@@ -188,40 +188,40 @@ proc build*(builder: ExprBuilder,
           if builder.iter in ctx.schedule.loops:
             loop.schedule = ctx.schedule.loops[builder.iter]
           if builder.children.len > 0:
-            loop.has_bounds = true
-            loop.start = builder.children[0].build_linear_index(ctx)
-            loop.stop = builder.children[1].build_linear_index(ctx)
+            loop.hasBounds = true
+            loop.start = builder.children[0].buildLinearIndex(ctx)
+            loop.stop = builder.children[1].buildLinearIndex(ctx)
             loop.step = 1
           ctx.kernel.loops.add(loop)
-        builder.res[block_id] = ctx.iters[builder.iter]
+        builder.res[blockId] = ctx.iters[builder.iter]
       of ExprInstr:
         var instr = Instr(kind: builder.instr)
         for child in builder.children:
-          instr.args.add(child.build(instrs, block_id, ctx))
+          instr.args.add(child.build(instrs, blockId, ctx))
         
-        if not builder.tensor.is_nil:
-          instr.tensor = ctx.lookup_tensor(builder.tensor)
+        if not builder.tensor.isNil:
+          instr.tensor = ctx.lookupTensor(builder.tensor)
         
         case builder.instr:
-          of InstrIndex: instr.index_lit = builder.index_lit
-          of InstrScalar: instr.scalar_lit = builder.scalar_lit
-          of InstrBoolean: instr.boolean_lit = builder.boolean_lit
+          of InstrIndex: instr.indexLit = builder.indexLit
+          of InstrScalar: instr.scalarLit = builder.scalarLit
+          of InstrBoolean: instr.booleanLit = builder.booleanLit
           of InstrShape: instr.dim = builder.dim
           else: discard 
         
         instr.res = ctx.kernel.regs.alloc()
-        builder.res[block_id] = instr.res
+        builder.res[blockId] = instr.res
         instrs.add(instr)
   
-  result = builder.res[block_id]
+  result = builder.res[blockId]
 
-proc build_expr(builder: ExprBuilder, ctx: var BuildContext): Expr =
-  result.res = builder.build(result.instrs, ctx.alloc_block(), ctx)
+proc buildExpr(builder: ExprBuilder, ctx: var BuildContext): Expr =
+  result.res = builder.build(result.instrs, ctx.allocBlock(), ctx)
 
 proc clear(expr: ExprBuilder) =
   for child in expr.children:
     child.clear()
-  expr.res = init_table[int, RegId]()
+  expr.res = initTable[int, RegId]()
 
 proc clear(builder: KernelBuilder) =
   ExprBuilder(builder.value).clear()
@@ -231,57 +231,57 @@ proc clear(builder: KernelBuilder) =
 proc build(builder: KernelBuilder, ctx: var BuildContext): Kernel =
   result = Kernel()
   ctx.kernel = result
-  ctx.schedule = builder.schedules[ctx.compile_target]
-  result.expr = ExprBuilder(builder.value).build_expr(ctx)
+  ctx.schedule = builder.schedules[ctx.compileTarget]
+  result.expr = ExprBuilder(builder.value).buildExpr(ctx)
   result.write = TensorOp(
-    tensor: ctx.lookup_tensor(builder.target),
-    is_raw: builder.is_raw,
+    tensor: ctx.lookupTensor(builder.target),
+    isRaw: builder.isRaw,
     data: result.expr.res
   )
   for dim in builder.dims:
-    result.write.dims.add(ExprBuilder(dim).build_linear_index(ctx))
-  if builder.has_custom_grad:
-    result.grad = KernelGradient(is_custom: true)
-    var grads = init_table[TensorId, TensorId]()
+    result.write.dims.add(ExprBuilder(dim).buildLinearIndex(ctx))
+  if builder.hasCustomGrad:
+    result.grad = KernelGradient(isCustom: true)
+    var grads = initTable[TensorId, TensorId]()
     for grad in builder.grads:
       grad.clear()
-      var grad_ctx = BuildContext(
+      var gradCtx = BuildContext(
         grads: grads,
-        compile_target: ctx.compile_target
+        compileTarget: ctx.compileTarget
       )
-      result.grad.kernels.add(grad.build(grad_ctx))
-      grads = grad_ctx.grads
+      result.grad.kernels.add(grad.build(gradCtx))
+      grads = gradCtx.grads
     result.grad.tensors = grads
 
-proc build(builder: KernelBuilder, compile_target: CompileTarget): Kernel =
+proc build(builder: KernelBuilder, compileTarget: CompileTarget): Kernel =
   builder.clear()
-  var ctx = BuildContext(compile_target: compile_target)
+  var ctx = BuildContext(compileTarget: compileTarget)
   result = builder.build(ctx)
 
-proc alloc_tensors(fun: Fun, program: Program) =
+proc allocTensors(fun: Fun, program: Program) =
   if fun.tensor == TensorId(0):
     case fun.kind:
       of FunInput:
         if fun.name notin program.inputs:
           program.inputs[fun.name] = program.tensors.alloc(TensorDef(
             kind: TensorInput,
-            shape: fun.input_shape,
+            shape: fun.inputShape,
             name: fun.name
           ))
         fun.tensor = program.inputs[fun.name]
-        if program.tensors[fun.tensor].shape != fun.input_shape:
+        if program.tensors[fun.tensor].shape != fun.inputShape:
           raise ParserError(msg: "Expected shapes for input \"" & fun.name & "\" do not match.")
       of FunParam:
         fun.tensor = program.tensors.alloc(TensorDef(
           kind: TensorParam,
-          shape: fun.param_shape,
-          init_range: fun.init_range,
+          shape: fun.paramShape,
+          initRange: fun.initRange,
           name: fun.name
         ))
       of FunRandom:
         fun.tensor = program.tensors.alloc(TensorDef(
           kind: TensorRandom,
-          random_range: fun.random_range,
+          randomRange: fun.randomRange,
           name: fun.name
         ))
       of FunResult, FunGradient, FunReshape:
@@ -290,10 +290,10 @@ proc alloc_tensors(fun: Fun, program: Program) =
           name: fun.name
         ))
       of FunEffect:
-        fun.effect.alloc_tensors(program)
+        fun.effect.allocTensors(program)
         fun.tensor = fun.effect.tensor
       of FunCache:
-        fun.cache.alloc_tensors(program)
+        fun.cache.allocTensors(program)
         fun.tensor = program.tensors.alloc(TensorDef(
           kind: TensorCache,
           cache: fun.cache.tensor,
@@ -302,13 +302,13 @@ proc alloc_tensors(fun: Fun, program: Program) =
       of FunCond:
         fun.tensor = TensorId(0)
         for target, child in fun.cond:
-          child.alloc_tensors(program)
-        if not fun.cond_else.is_nil:
-          fun.cond_else.alloc_tensors(program)
+          child.allocTensors(program)
+        if not fun.condElse.isNil:
+          fun.condElse.allocTensors(program)
       else: discard
     
     for child in fun.children:
-      child.alloc_tensors(program)
+      child.allocTensors(program)
     
     case fun.kind:
       of FunTarget: fun.tensor = fun.children[0].tensor
@@ -325,19 +325,19 @@ proc flatten(fun: Fun, target: Target) =
     case fun.kind:
       of FunResult, FunEffect:
         for kernel in fun.kernels:
-          target.kernels.add(kernel.build(target.compile_target))
-        case fun.shape_constr.kind:
+          target.kernels.add(kernel.build(target.compileTarget))
+        case fun.shapeConstr.kind:
           of ShapeCopy:
             target.shapes.add(ShapeConstraint(kind: ShapeCopy,
               dest: fun.tensor,
-              src: fun.shape_constr.copy.tensor
+              src: fun.shapeConstr.copy.tensor
             ))
           of ShapeDims:
             var constr = ShapeConstraint(kind: ShapeDims, dest: fun.tensor)
-            for dim in fun.shape_constr.dims:
+            for dim in fun.shapeConstr.dims:
               var ctx = BuildContext(kernel: Kernel())
               ExprBuilder(dim).clear()
-              constr.dims.add(ExprBuilder(dim).build_linear_index(ctx))
+              constr.dims.add(ExprBuilder(dim).buildLinearIndex(ctx))
             target.shapes.add(constr)
           else: discard
       of FunBackwards:
@@ -365,8 +365,8 @@ proc flatten(fun: Fun, target: Target) =
         var child = Fun(nil)
         if target.name in fun.cond:
           child = fun.cond[target.name]
-        elif not fun.cond_else.is_nil:
-          child = fun.cond_else
+        elif not fun.condElse.isNil:
+          child = fun.condElse
         else:
           raise ParserError(msg: "Conditional node does not have a branch for the target \"" & target.name & "\"")
         child.flatten(target)
@@ -377,7 +377,7 @@ proc flatten(fun: Fun, target: Target) =
         ))
       else: discard
 
-proc collect_targets(fun: Fun, targets: var Table[string, Fun]) =
+proc collectTargets(fun: Fun, targets: var Table[string, Fun]) =
   case fun.kind:
     of FunTarget:
       if fun.name in targets:
@@ -388,92 +388,92 @@ proc collect_targets(fun: Fun, targets: var Table[string, Fun]) =
       targets[fun.name] = fun
     of FunCond:
       for name, child in fun.cond:
-        child.collect_targets(targets)
-      if not fun.cond_else.is_nil:
-        fun.cond_else.collect_targets(targets)
+        child.collectTargets(targets)
+      if not fun.condElse.isNil:
+        fun.condElse.collectTargets(targets)
     else: discard
   for child in fun.children:
-    child.collect_targets(targets)
+    child.collectTargets(targets)
 
-proc to_program*(graphs: openArray[Fun]): Program =
+proc toProgram*(graphs: openArray[Fun]): Program =
   result = Program()
-  var targets = init_table[string, Fun]()
+  var targets = initTable[string, Fun]()
   for fun in graphs:
-    fun.alloc_tensors(result)
-    fun.collect_targets(targets)
+    fun.allocTensors(result)
+    fun.collectTargets(targets)
   for name, fun in targets:
     let target = Target(
       name: name,
       output: fun.tensor,
-      compile_target: fun.compile_target
+      compileTarget: fun.compileTarget
     )
     fun.flatten(target)
     result.targets[name] = target
 
 proc `$`(fun: Fun): string =
-  if fun.is_nil:
+  if fun.isNil:
     result = "nil"
   else:
     result = "<fun>"
 
-proc ensure_init(fun: var Fun) =
-  if fun.is_nil:
+proc ensureInit(fun: var Fun) =
+  if fun.isNil:
     fun = Fun(kind: FunResult)
 
-proc collect_children(expr: ExprBuilder, fun: Fun) =
+proc collectChildren(expr: ExprBuilder, fun: Fun) =
   for child in expr.children:
-    child.collect_children(fun)
-  if not expr.tensor.is_nil:
+    child.collectChildren(fun)
+  if not expr.tensor.isNil:
     if expr.tensor != fun and expr.tensor notin fun.children: # TODO?
       fun.children.add(expr.tensor)
 
-proc add_kernel(fun: Fun, kernel: KernelBuilder) =
+proc addKernel(fun: Fun, kernel: KernelBuilder) =
   if fun.kind notin {FunResult, FunEffect}:
     raise ParserError(msg: "Unable to add a kernel to a " & $fun.kind)
   fun.kernels.add(kernel)
-  collect_children(ExprBuilder(kernel.value), fun)
+  collectChildren(ExprBuilder(kernel.value), fun)
 
-proc is_name(node: NimNode): bool =
+proc isName(node: NimNode): bool =
   result = node.kind == nnkIdent or node.kind == nnkSym
 
-proc is_name(node: NimNode, name: string): bool =
-  result = node.is_name and nim_ident_normalize(node.str_val) == nim_ident_normalize(name)
+proc isName(node: NimNode, name: string): bool =
+  result = node.isName and nimIdentNormalize(node.strVal) == nimIdentNormalize(name)
 
-proc new_dot_expr(node: NimNode, field: string): NimNode =
-  result = new_tree(nnkDotExpr, node, ident(field))
+proc newDotExpr(node: NimNode, field: string): NimNode =
+  result = newTree(nnkDotExpr, node, ident(field))
 
-proc new_bracket_expr(node, index: NimNode): NimNode =
-  result = new_tree(nnkBracketExpr, node, index)
+proc newBracketExpr(node, index: NimNode): NimNode =
+  result = newTree(nnkBracketExpr, node, index)
 
-proc new_obj_constr(typ: NimNode, attrs: openArray[(string, NimNode)]): NimNode =
-  result = new_tree(nnkObjConstr, typ)
+proc newObjConstr(typ: NimNode, attrs: openArray[(string, NimNode)]): NimNode =
+  result = newTree(nnkObjConstr, typ)
   for (name, value) in attrs:
-    result.add(new_tree(nnkExprColonExpr, ident(name), value))
+    result.add(newTree(nnkExprColonExpr, ident(name), value))
 
 type TargetInfo = object
   tensor: NimNode
   dims: seq[NimNode]
-  is_raw: bool
-  define_tensor: bool
+  isRaw: bool
+  defineTensor: bool
 
-proc parse_target(node: NimNode): TargetInfo =
+proc parseTarget(node: NimNode): TargetInfo =
   case node.kind:
     of nnkInfix:
-      assert node[0].eq_ident("*")
-      result.define_tensor = true
+      assert node[0].eqIdent("*")
+      result.defineTensor = true
       result.tensor = node[1]
       assert node[2].kind in {nnkCurly, nnkBracket}
       if node[2].kind == nnkCurly:
-        result.is_raw = true
+        result.isRaw = true
       for child in node[2]:
         result.dims.add(child)
     of nnkBracketExpr, nnkCurlyExpr:
       result.tensor = node[0]
-      result.is_raw = node.kind == nnkCurlyExpr
+      result.isRaw = node.kind == nnkCurlyExpr
       for it in 1..<node.len:
         result.dims.add(node[it])
     of nnkCall:
-      if node[0].eq_ident("[]") or node[0].eq_ident("{}"):
+      if node[0].eqIdent("[]") or node[0].eqIdent("{}"):
         result.tensor = node[1]
         for it in 2..<node.len:
           result.dims.add(node[it])
@@ -488,18 +488,18 @@ type
     loops: Table[string, LoopSchedule]
   
   KernelAttrs = object
-    has_custom_grad: bool
-    custom_grad: seq[NimNode]
+    hasCustomGrad: bool
+    customGrad: seq[NimNode]
     schedules: array[CompileTarget, ScheduleDef]
 
-proc lookup_loop(schedule: ScheduleDef, iter_name: string): var LoopSchedule =
-  let name = iter_name.nim_ident_normalize()
+proc lookupLoop(schedule: ScheduleDef, iterName: string): var LoopSchedule =
+  let name = iterName.nimIdentNormalize()
   if name notin schedule.loops:
     schedule.loops[name] = DEFAULT_LOOP_SCHEDULE
   result = schedule.loops[name]
 
-proc lookup_tensor(schedule: ScheduleDef, tensor_name: string): var TensorSchedule =
-  let name = tensor_name.nim_ident_normalize()
+proc lookupTensor(schedule: ScheduleDef, tensorName: string): var TensorSchedule =
+  let name = tensorName.nimIdentNormalize()
   if name notin schedule.tensors:
     schedule.tensors[name] = DEFAULT_TENSOR_SCHEDULE
   result = schedule.tensors[name]
@@ -507,224 +507,224 @@ proc lookup_tensor(schedule: ScheduleDef, tensor_name: string): var TensorSchedu
 const TARGET_NAMES = block:
   var names: seq[string] = @[]
   for target in ALL_COMPILE_TARGETS:
-    names.add(($target)[len("Compile")..^1].to_lower_ascii().nim_ident_normalize())
+    names.add(($target)[len("Compile")..^1].toLowerAscii().nimIdentNormalize())
   names
 
-proc parse_schedules(node: NimNode,
+proc parseSchedules(node: NimNode,
                      schedules: array[CompileTarget, ScheduleDef],
                      targets: set[CompileTarget]) =
   for child in node:
     if child.kind == nnkDiscardStmt:
       continue
     assert child.kind in nnkCallKinds
-    assert child[0].is_name
+    assert child[0].isName
     
     template property(body: untyped) =
       for target in targets:
         let schedule {.inject.} = schedules[target]
         body
     
-    let name = nim_ident_normalize(child[0].str_val)
+    let name = nimIdentNormalize(child[0].strVal)
     case name:
       of TARGET_NAMES:
-        let target = parse_enum[CompileTarget]("Compile" & name)
+        let target = parseEnum[CompileTarget]("Compile" & name)
         if target notin targets:
           raise ParserError(msg: "Unreachable schedule condition")
-        child[^1].parse_schedules(schedules, {target})
+        child[^1].parseSchedules(schedules, {target})
       of "cache":
         property:
-          schedule.lookup_tensor(child[1].str_val).cache = true
+          schedule.lookupTensor(child[1].strVal).cache = true
       of "tile":
         property:
-          schedule.lookup_loop(child[1].str_val).tile = true
+          schedule.lookupLoop(child[1].strVal).tile = true
       of "tilesize":
         property:
-          schedule.lookup_loop(child[1].str_val).tile_size = child[2].int_val.int
+          schedule.lookupLoop(child[1].strVal).tileSize = child[2].intVal.int
       of "parallel":
         property:
           for it in 1..<child.len:
             let arg = child[it]
-            assert arg.is_name
-            schedule.lookup_loop(arg.str_val).parallel = true
+            assert arg.isName
+            schedule.lookupLoop(arg.strVal).parallel = true
       of "sharecache":
         property:
-          schedule.lookup_loop(child[1].str_val).share_cache = true
+          schedule.lookupLoop(child[1].strVal).shareCache = true
       else:
         raise ParserError(msg: "Unknown schedule property " & $name)
 
-proc parse_schedules(node: NimNode): array[CompileTarget, ScheduleDef] =
+proc parseSchedules(node: NimNode): array[CompileTarget, ScheduleDef] =
   for target, schedule in result.mpairs:
     schedule = ScheduleDef()
-  node.parse_schedules(result, ALL_COMPILE_TARGETS)
+  node.parseSchedules(result, ALL_COMPILE_TARGETS)
 
-proc gen_kernel_builder(target: TargetInfo, value_node: NimNode, attrs: KernelAttrs): NimNode
+proc genKernelBuilder(target: TargetInfo, valueNode: NimNode, attrs: KernelAttrs): NimNode
 
-proc parse_attrs(node: NimNode): KernelAttrs =
+proc parseAttrs(node: NimNode): KernelAttrs =
   for child in node:
     if child.kind in nnkCallKinds:
-      assert child[0].is_name
-      case nim_ident_normalize(child[0].str_val):
+      assert child[0].isName
+      case nimIdentNormalize(child[0].strVal):
         of "customgrad":
-          result.has_custom_grad = true
-          for kernel_node in child[1]:
-            if kernel_node.kind == nnkDiscardStmt:
+          result.hasCustomGrad = true
+          for kernelNode in child[1]:
+            if kernelNode.kind == nnkDiscardStmt:
               continue
-            if kernel_node.kind != nnkInfix or not kernel_node[0].eq_ident("++=") or kernel_node.len < 3:
+            if kernelNode.kind != nnkInfix or not kernelNode[0].eqIdent("++=") or kernelNode.len < 3:
               raise ParserError(msg: "Custom gradient must be a valid kernel")
             
             var attrs = KernelAttrs()
-            if kernel_node.len >= 4:
-              attrs = kernel_node[3].parse_attrs()
-            let target = kernel_node[1].parse_target()
-            result.custom_grad.add(gen_kernel_builder(target, kernel_node[2], attrs))
+            if kernelNode.len >= 4:
+              attrs = kernelNode[3].parseAttrs()
+            let target = kernelNode[1].parseTarget()
+            result.customGrad.add(genKernelBuilder(target, kernelNode[2], attrs))
         of "schedule":
-          result.schedules = child[^1].parse_schedules()
+          result.schedules = child[^1].parseSchedules()
         else:
           raise ParserError(msg: $child[0].name & " is not a valid kernel attribute")
     elif child.kind != nnkDiscardStmt:
       raise ParserError(msg: $child.kind & " is not a valid kernel attribute")
 
-proc new_lit(schedule: ScheduleDef): NimNode =
-  if schedule.is_nil:
-    return new_obj_constr(bind_sym("Schedule"), [])
-  result = new_nim_node(nnkStmtListExpr)
-  let name = gen_sym()
-  result.add(new_let_stmt(name, new_obj_constr(bind_sym("Schedule"), {
-    "loops": new_lit(schedule.loops)
+proc newLit(schedule: ScheduleDef): NimNode =
+  if schedule.isNil:
+    return newObjConstr(bindSym("Schedule"), [])
+  result = newNimNode(nnkStmtListExpr)
+  let name = genSym()
+  result.add(newLetStmt(name, newObjConstr(bindSym("Schedule"), {
+    "loops": newLit(schedule.loops)
   })))
-  for tensor_name, tensor_schedule in schedule.tensors:
-    result.add(new_call(bind_sym("[]="),
-      name.new_dot_expr("tensors"),
-      ident(tensor_name),
-      new_lit(tensor_schedule)
+  for tensorName, tensorSchedule in schedule.tensors:
+    result.add(newCall(bindSym("[]="),
+      name.newDotExpr("tensors"),
+      ident(tensorName),
+      newLit(tensorSchedule)
     ))
   result.add(name)
-  result = new_tree(nnkBlockStmt, new_empty_node(), result)
+  result = newTree(nnkBlockStmt, newEmptyNode(), result)
 
 type Iterator = object
   name: string
   start: NimNode
   stop: NimNode
 
-proc parse_iterators(node: NimNode): seq[Iterator] = 
+proc parseIterators(node: NimNode): seq[Iterator] = 
   case node.kind:
     of nnkSym, nnkIdent:
-      result.add(Iterator(name: node.str_val))
+      result.add(Iterator(name: node.strVal))
     of nnkPar, nnkTupleConstr:
       for child in node:
-        result.add(child.parse_iterators())
+        result.add(child.parseIterators())
     of nnkInfix:
-      if not node[0].eq_ident("in") or not node[1].is_name():
+      if not node[0].eqIdent("in") or not node[1].isName():
         raise ParserError()
-      if not node[2][0].eq_ident("..<"):
+      if not node[2][0].eqIdent("..<"):
         raise ParserError(msg: node[2][1].repr & " is not a valid iterator")
       result.add(Iterator(
-        name: node[1].str_val,
+        name: node[1].strVal,
         start: node[2][1],
         stop: node[2][2]
       ))
     else:
       raise ParserError(msg: node.repr & " is not a valid iterator")
 
-proc gen_kernel_builder(target: TargetInfo, value_node: NimNode, attrs: KernelAttrs): NimNode =
+proc genKernelBuilder(target: TargetInfo, valueNode: NimNode, attrs: KernelAttrs): NimNode =
   var dims: seq[NimNode] = @[]
   for dim in target.dims:
-    dims.add(new_call(bind_sym("literal"), dim))
+    dims.add(newCall(bindSym("literal"), dim))
   var
-    value = value_node
+    value = valueNode
     iters: seq[Iterator] = @[]
-  if value.kind == nnkInfix and value[0].eq_ident("|"):
+  if value.kind == nnkInfix and value[0].eqIdent("|"):
     value = value[1]
-    iters = value_node[2].parse_iterators()
+    iters = valueNode[2].parseIterators()
   var fields = @{
     "target": target.tensor,
-    "dims": new_call(bind_sym("@"), new_tree(nnkBracket, dims)),
-    "is_raw": new_lit(target.is_raw),
+    "dims": newCall(bindSym("@"), newTree(nnkBracket, dims)),
+    "isRaw": newLit(target.isRaw),
     "value": value,
-    "schedules": new_lit(attrs.schedules)
+    "schedules": newLit(attrs.schedules)
   }
-  if attrs.has_custom_grad:
-    fields.add(("has_custom_grad", new_lit(true)))
-    fields.add(("grads", new_call(bind_sym("@"), new_tree(nnkBracket, attrs.custom_grad))))
-  result = new_nim_node(nnkStmtListExpr)
+  if attrs.hasCustomGrad:
+    fields.add(("hasCustomGrad", newLit(true)))
+    fields.add(("grads", newCall(bindSym("@"), newTree(nnkBracket, attrs.customGrad))))
+  result = newNimNode(nnkStmtListExpr)
   for iter in iters:
-    let call = new_call(bind_sym("iterator_literal"), new_lit(iter.name))
-    if not iter.start.is_nil:
-      call.add(new_tree(nnkExprEqExpr, ident("start"), iter.start))
-    if not iter.stop.is_nil:
-      call.add(new_tree(nnkExprEqExpr, ident("stop"), iter.stop))
-    result.add(new_let_stmt(ident(iter.name), call))
-  result.add(new_obj_constr(bind_sym("KernelBuilder"), fields))
-  result = new_tree(nnkBlockStmt, new_empty_node(), result)
+    let call = newCall(bindSym("iteratorLiteral"), newLit(iter.name))
+    if not iter.start.isNil:
+      call.add(newTree(nnkExprEqExpr, ident("start"), iter.start))
+    if not iter.stop.isNil:
+      call.add(newTree(nnkExprEqExpr, ident("stop"), iter.stop))
+    result.add(newLetStmt(ident(iter.name), call))
+  result.add(newObjConstr(bindSym("KernelBuilder"), fields))
+  result = newTree(nnkBlockStmt, newEmptyNode(), result)
 
-proc gen_kernel(target_node, value, attrs_node: NimNode): NimNode =
+proc genKernel(targetNode, value, attrsNode: NimNode): NimNode =
   let
-    target = target_node.parse_target()
-    attrs = attrs_node.parse_attrs()
-    kernel = gen_kernel_builder(target, value, attrs)
-  result = new_stmt_list()
-  if target.define_tensor:
-    result.add(new_var_stmt(target.tensor, new_call(bind_sym("Fun"), new_nil_lit())))
-  result.add(new_call(bind_sym("ensure_init"), target.tensor))
-  result.add(new_call(bind_sym("add_kernel"), target.tensor, kernel))
+    target = targetNode.parseTarget()
+    attrs = attrsNode.parseAttrs()
+    kernel = genKernelBuilder(target, value, attrs)
+  result = newStmtList()
+  if target.defineTensor:
+    result.add(newVarStmt(target.tensor, newCall(bindSym("Fun"), newNilLit())))
+  result.add(newCall(bindSym("ensureInit"), target.tensor))
+  result.add(newCall(bindSym("addKernel"), target.tensor, kernel))
 
-macro `++=`*(target_node, value, attrs_node: untyped): untyped =
-  result = gen_kernel(target_node, value, attrs_node)
+macro `++=`*(targetNode, value, attrsNode: untyped): untyped =
+  result = genKernel(targetNode, value, attrsNode)
 
-macro `++=`*(target_node, value: untyped): untyped =
-  result = gen_kernel(target_node, value, new_stmt_list())
+macro `++=`*(targetNode, value: untyped): untyped =
+  result = genKernel(targetNode, value, newStmtList())
 
-proc copy_shape*(fun, src: Fun) =
+proc copyShape*(fun, src: Fun) =
   if fun.kind != FunResult:
     raise ParserError(msg: "Cannot set shape of " & $fun.kind)
-  fun.shape_constr = ShapeConstraintBuilder(kind: ShapeCopy, copy: src)
+  fun.shapeConstr = ShapeConstraintBuilder(kind: ShapeCopy, copy: src)
   if src notin fun.children:
     fun.children.add(src)
 
-proc with_shape*(fun: Fun, dims: varargs[Index, literal]) =
+proc withShape*(fun: Fun, dims: varargs[Index, literal]) =
   if fun.kind != FunResult:
     raise ParserError(msg: "Cannot set shape of " & $fun.kind)
-  fun.shape_constr = ShapeConstraintBuilder(kind: ShapeDims, dims: @dims)
+  fun.shapeConstr = ShapeConstraintBuilder(kind: ShapeDims, dims: @dims)
   for dim in dims:
-    collect_children(ExprBuilder(dim), fun)
+    collectChildren(ExprBuilder(dim), fun)
 
 macro layer*(fn: untyped): untyped =
   result = fn
   var name = fn.name
-  while not name.is_name():
+  while not name.isName():
     case name.kind:
       of nnkPostfix: name = name[1]
       else:
-        raise new_exception(ValueError, "Unable to extract name from " & $name.kind)
-  result.body.add(new_assignment(
-    new_tree(nnkDotExpr, ident("result"), ident("name")),
-    new_lit(name.str_val)
+        raise newException(ValueError, "Unable to extract name from " & $name.kind)
+  result.body.add(newAssignment(
+    newTree(nnkDotExpr, ident("result"), ident("name")),
+    newLit(name.strVal)
   ))
 
 proc lock*(fun: Fun) =
   fun.locked = true
 
 proc param*(shape: openArray[int],
-            init_range: HSlice[float64, float64] = -0.1..0.1): Fun =
+            initRange: HSlice[float64, float64] = -0.1..0.1): Fun =
   result = Fun(kind: FunParam,
-    init_range: init_range,
-    param_shape: new_seq[int](shape.len)
+    initRange: initRange,
+    paramShape: newSeq[int](shape.len)
   )
   for dim, size in shape:
-    result.param_shape[dim] = size
+    result.paramShape[dim] = size
 
 proc input*(name: string, shape: openArray[int] = []): Fun =
   result = Fun(kind: FunInput,
     name: name,
-    input_shape: new_seq[int](shape.len)
+    inputShape: newSeq[int](shape.len)
   )
   for dim, size in shape:
-    result.input_shape[dim] = size
+    result.inputShape[dim] = size
 
-proc rand*(fun: Fun, rand_range: HSlice[float64, float64]): Fun =
+proc rand*(fun: Fun, randRange: HSlice[float64, float64]): Fun =
   result = Fun(kind: FunRandom,
     children: @[fun],
-    random_range: rand_range
+    randomRange: randRange
   )
 
 proc backwards*(fun: Fun): Fun =
@@ -739,12 +739,12 @@ proc params*(fun: Fun, stop: HashSet[string]): HashSet[Fun] =
       of FunCond:
         for target, child in fun.cond:
           result = result.union(child.params(stop))
-        if not fun.cond_else.is_nil:
-          result = result.union(fun.cond_else.params(stop))
+        if not fun.condElse.isNil:
+          result = result.union(fun.condElse.params(stop))
       else: discard
 
 proc params*(fun: Fun, stop: openArray[string] = []): HashSet[Fun] =
-  result = fun.params(to_hash_set(stop))
+  result = fun.params(toHashSet(stop))
 
 proc optimize*(gradients: Fun,
                params: HashSet[Fun],
@@ -779,7 +779,7 @@ proc reshape*(fun: Fun, shape: openArray[int]): Fun =
   result = Fun(kind: FunReshape,
     name: "reshape",
     children: @[fun],
-    reshape: new_seq[int](shape.len)
+    reshape: newSeq[int](shape.len)
   )
   for dim, size in shape:
     result.reshape[dim] = size
@@ -791,33 +791,33 @@ proc cache*(cache: Fun, name: string = ""): Fun =
 
 proc target*(fun: Fun,
              name: string,
-             compile_target = CompileThreads): Fun =
+             compileTarget = CompileThreads): Fun =
   result = Fun(kind: FunTarget,
     name: name,
     children: @[fun],
-    compile_target: compile_target
+    compileTarget: compileTarget
   )
   when not TARGET_SUPPORTS_THREADS:
-    if compile_target == CompileThreads:
-      result.compile_target = CompileCpu
+    if compileTarget == CompileThreads:
+      result.compileTarget = CompileCpu
 
 proc cond*(branches: openArray[(string, Fun)],
            otherwise: Fun = nil): Fun =
   result = Fun(kind: FunCond,
-    cond: to_table(branches),
-    cond_else: otherwise
+    cond: toTable(branches),
+    condElse: otherwise
   )
 
-macro make_opt*(opt: typed, args: varargs[untyped]): untyped =
-  result = new_tree(nnkCall, opt, ident("param"), ident("grad"))
+macro makeOpt*(opt: typed, args: varargs[untyped]): untyped =
+  result = newTree(nnkCall, opt, ident("param"), ident("grad"))
   for arg in args:
     result.add(arg)
   
-  result = new_proc(
+  result = newProc(
     params=[
-      new_empty_node(),
-      new_ident_defs(ident("param"), new_tree(nnkVarTy, bind_sym("Fun"))),
-      new_ident_defs(ident("grad"), bind_sym("Fun"))
+      newEmptyNode(),
+      newIdentDefs(ident("param"), newTree(nnkVarTy, bindSym("Fun"))),
+      newIdentDefs(ident("grad"), bindSym("Fun"))
     ],
-    body=new_stmt_list(result)
+    body=newStmtList(result)
   )

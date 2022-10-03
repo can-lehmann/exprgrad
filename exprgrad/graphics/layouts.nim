@@ -28,30 +28,30 @@ type
   GridLayout* = ref object of Figure
     padding: Vec2
     spacing: Vec2
-    cell_counts: Index2
+    cellCounts: Index2
     figures: seq[GridFigure]
 
-method min_size*(figure: Figure): Vec2 {.base.} = discard
+method minSize*(figure: Figure): Vec2 {.base.} = discard
 method draw*(figure: Figure, rect: Box2, canvas: var Canvas) {.base.} = discard
 
 proc pack*(layout: GridLayout, pos, size: Index2, figure: Figure) =
   layout.figures.add(GridFigure(figure: figure, pos: pos, size: size))
-  layout.cell_counts = max(layout.cell_counts, pos + size)
+  layout.cellCounts = max(layout.cellCounts, pos + size)
 
 proc pack*(layout: GridLayout, pos: Index2, figure: Figure) =
   layout.pack(pos, Index2(x: 1, y: 1), figure)
 
-proc min_cell_sizes(layout: GridLayout, axis: Axis): seq[float64] =
-  var order = to_seq(0..<layout.figures.len)
+proc minCellSizes(layout: GridLayout, axis: Axis): seq[float64] =
+  var order = toSeq(0..<layout.figures.len)
   order.sort((a, b) => cmp(layout.figures[a].size[axis], layout.figures[b].size[axis]))
   
-  result = new_seq[float64](layout.cell_counts[axis])
+  result = newSeq[float64](layout.cellCounts[axis])
   for index in order:
     let
       figure = layout.figures[index]
-      size = figure.figure.min_size()[axis]
+      size = figure.figure.minSize()[axis]
     
-    let current_size = block:
+    let currentSize = block:
       var size = 0.0
       for offset in 0..<figure.size[axis]:
         let cell = offset + figure.pos[axis]
@@ -59,14 +59,14 @@ proc min_cell_sizes(layout: GridLayout, axis: Axis): seq[float64] =
       size += float64(figure.size[axis] - 1) * layout.spacing[axis]
       size
     
-    let delta = size - current_size
+    let delta = size - currentSize
     if delta > 0:
-      let grow_by = delta / float64(figure.size[axis])
+      let growBy = delta / float64(figure.size[axis])
       for offset in 0..<figure.size[axis]:
-        result[figure.pos[axis] + offset] += grow_by
+        result[figure.pos[axis] + offset] += growBy
 
-proc arrange_axis(layout: GridLayout, axis: Axis, into: Inter): seq[Inter] =
-  var cells = layout.min_cell_sizes(axis)
+proc arrangeAxis(layout: GridLayout, axis: Axis, into: Inter): seq[Inter] =
+  var cells = layout.minCellSizes(axis)
    
   let
     used = cells.sum() + layout.spacing[axis] * float64(cells.len - 1) + layout.padding[axis] * 2
@@ -76,14 +76,14 @@ proc arrange_axis(layout: GridLayout, axis: Axis, into: Inter): seq[Inter] =
       cell += delta / float64(cells.len)
   
   var
-    offsets = new_seq[float64](layout.cell_counts[axis] + 1)
+    offsets = newSeq[float64](layout.cellCounts[axis] + 1)
     offset = layout.padding[axis] + into.min
-  for cell_id, size in cells:
-    offsets[cell_id] = offset
+  for cellId, size in cells:
+    offsets[cellId] = offset
     offset += size + layout.spacing[axis]
   offsets[^1] = offset
   
-  result = new_seq[Inter](layout.figures.len)
+  result = newSeq[Inter](layout.figures.len)
   for it, figure in layout.figures:
     result[it] = Inter(
       min: offsets[figure.pos[axis]],
@@ -92,21 +92,21 @@ proc arrange_axis(layout: GridLayout, axis: Axis, into: Inter): seq[Inter] =
 
 proc arrange(layout: GridLayout, box: Box2): seq[Box2] =
   let
-    x_inters = layout.arrange_axis(AxisX, box.x_inter)
-    y_inters = layout.arrange_axis(AxisY, box.y_inter)
-  result = new_seq[Box2](layout.figures.len)
+    xInters = layout.arrangeAxis(AxisX, box.xInter)
+    yInters = layout.arrangeAxis(AxisY, box.yInter)
+  result = newSeq[Box2](layout.figures.len)
   for it, box in result.mpairs:
-    box.min.x = x_inters[it].min
-    box.min.y = y_inters[it].min
-    box.max.x = x_inters[it].max
-    box.max.y = y_inters[it].max
+    box.min.x = xInters[it].min
+    box.min.y = yInters[it].min
+    box.max.x = xInters[it].max
+    box.max.y = yInters[it].max
 
-method min_size*(layout: GridLayout): Vec2 =
+method minSize*(layout: GridLayout): Vec2 =
   result = Vec2(
-    x: layout.min_cell_sizes(AxisX).sum(),
-    y: layout.min_cell_sizes(AxisY).sum()
+    x: layout.minCellSizes(AxisX).sum(),
+    y: layout.minCellSizes(AxisY).sum()
   )
-  result += to_vec2(layout.cell_counts - Index2(x: 1, y: 1)) * layout.spacing
+  result += toVec2(layout.cellCounts - Index2(x: 1, y: 1)) * layout.spacing
   result += 2.0 * layout.padding
 
 method draw*(layout: GridLayout, box: Box2, canvas: var Canvas) =
@@ -128,7 +128,7 @@ proc new*(_: typedesc[Spacer],
           color: Color = Color()): Spacer =
   result = Spacer(size: size, color: color)
 
-method min_size(spacer: Spacer): Vec2 = spacer.size
+method minSize(spacer: Spacer): Vec2 = spacer.size
 method draw(spacer: Spacer, box: Box2, canvas: var Canvas) =
   if spacer.color != Color():
     canvas.rect(box, fill = spacer.color, stroke = Color())

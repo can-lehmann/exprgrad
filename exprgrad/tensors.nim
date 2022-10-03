@@ -21,66 +21,66 @@ type
   TensorObj[T] = object
     shape*: seq[int]
     len*: int
-    is_view*: bool
+    isView*: bool
     data*: ptr UncheckedArray[T]
 
-when defined(gc_destructors):
+when defined(gcDestructors):
   proc `=destroy`[T](obj: var TensorObj[T]) =
-    if not obj.data.is_nil and not obj.is_view:
+    if not obj.data.isNil and not obj.isView:
       dealloc(obj.data)
 else:
   proc finalizer[T](tensor: Tensor[T]) =
-    if not tensor.is_nil and not tensor.data.is_nil and not tensor.is_view:
+    if not tensor.isNil and not tensor.data.isNil and not tensor.isView:
       dealloc(tensor.data)
 
-proc alloc_shape*[T](tensor: Tensor[T], shape: openArray[int], fill_zero: static[bool] = true) {.inline.} =
-  tensor.shape = new_seq[int](shape.len)
+proc allocShape*[T](tensor: Tensor[T], shape: openArray[int], fillZero: static[bool] = true) {.inline.} =
+  tensor.shape = newSeq[int](shape.len)
   var len = 1
   for it in 0..<shape.len:
     tensor.shape[it] = shape[it]
     len *= shape[it]
   if len != tensor.len:
-    if not tensor.data.is_nil and not tensor.is_view:
+    if not tensor.data.isNil and not tensor.isView:
       dealloc(tensor.data)
     tensor.data = cast[ptr UncheckedArray[T]](alloc(sizeof(T) * len))
     assert cast[int](tensor.data) mod sizeof(T) == 0
     tensor.len = len
-  if fill_zero:
-    zero_mem(tensor.data[0].addr, sizeof(T) * len)
+  if fillZero:
+    zeroMem(tensor.data[0].addr, sizeof(T) * len)
 
-proc alloc_tensor*[T](): Tensor[T] =
-  when defined(gc_destructors):
+proc allocTensor*[T](): Tensor[T] =
+  when defined(gcDestructors):
     result = Tensor[T]()
   else:
     new(result, finalizer=finalizer)
 
-proc new_tensor*[T](shape: openArray[int]): Tensor[T] =
-  result = alloc_tensor[T]()
-  result.alloc_shape(shape)
+proc newTensor*[T](shape: openArray[int]): Tensor[T] =
+  result = allocTensor[T]()
+  result.allocShape(shape)
 
-proc new_tensor*[T](shape: openArray[int], data: seq[T]): Tensor[T] =
+proc newTensor*[T](shape: openArray[int], data: seq[T]): Tensor[T] =
   assert shape.prod() == data.len
-  result = alloc_tensor[T]()
-  result.alloc_shape(shape, fill_zero = false)
-  copy_mem(result.data[0].addr, data[0].unsafe_addr, sizeof(T) * data.len)
+  result = allocTensor[T]()
+  result.allocShape(shape, fillZero = false)
+  copyMem(result.data[0].addr, data[0].unsafeAddr, sizeof(T) * data.len)
 
-proc new_tensor*[T](shape: openArray[int], value: T): Tensor[T] =
-  result = alloc_tensor[T]()
-  result.alloc_shape(shape, fill_zero=false)
+proc newTensor*[T](shape: openArray[int], value: T): Tensor[T] =
+  result = allocTensor[T]()
+  result.allocShape(shape, fillZero=false)
   for it in 0..<result.len:
     result.data[it] = value
 
-proc new_rand_tensor*[T](shape: openArray[int], slice: HSlice[T, T]): Tensor[T] =
-  result = new_tensor[T](shape)
+proc newRandTensor*[T](shape: openArray[int], slice: HSlice[T, T]): Tensor[T] =
+  result = newTensor[T](shape)
   for it in 0..<result.shape.prod:
     result.data[it] = rand(slice)
 
 proc clone*[T](tensor: Tensor[T]): Tensor[T] =
   result = Tensor[T]()
-  result.alloc_shape(tensor.shape)
-  copy_mem(result.data[0].addr, tensor.data[0].addr, sizeof(T) * tensor.len)
+  result.allocShape(tensor.shape)
+  copyMem(result.data[0].addr, tensor.data[0].addr, sizeof(T) * tensor.len)
 
-proc data_ptr*[T](tensor: Tensor[T]): ptr UncheckedArray[T] {.inline.} = tensor.data
+proc dataPtr*[T](tensor: Tensor[T]): ptr UncheckedArray[T] {.inline.} = tensor.data
 
 proc `==`*[T](a, b: Tensor[T]): bool =
   if a.len == b.len and a.shape == b.shape:
@@ -133,188 +133,188 @@ proc stringify[T](tensor: Tensor[T], dim: int, index: var int): string =
     result &= "]"
 
 proc `$`*[T](tensor: Tensor[T]): string =
-  if tensor.is_nil:
+  if tensor.isNil:
     result = "nil"
   else:
     var index = 0
     result = tensor.stringify(0, index)
 
-template define_elementwise(op) =
+template defineElementwise(op) =
   proc op*[T](a, b: Tensor[T]): Tensor[T] =
     assert a.shape == b.shape
-    result = new_tensor[T](a.shape)
+    result = newTensor[T](a.shape)
     for it in 0..<a.len:
       result.data[it] = op(a.data[it], b.data[it])
 
-define_elementwise(`+`)
-define_elementwise(`-`)
-define_elementwise(min)
-define_elementwise(max)
+defineElementwise(`+`)
+defineElementwise(`-`)
+defineElementwise(min)
+defineElementwise(max)
 
-template define_elementwise_unary(op) =
+template defineElementwiseUnary(op) =
   proc op*[T](tensor: Tensor[T]): Tensor[T] =
-    result = new_tensor[T](tensor.shape)
+    result = newTensor[T](tensor.shape)
     for it in 0..<tensor.len:
       result.data[it] = op(tensor.data[it])
 
-define_elementwise_unary(abs)
-define_elementwise_unary(`-`)
+defineElementwiseUnary(abs)
+defineElementwiseUnary(`-`)
 
-template define_elementwise_mut(op) =
+template defineElementwiseMut(op) =
   proc op*[T](a, b: Tensor[T]) =
     assert a.shape == b.shape
     for it in 0..<a.len:
       op(a.data[it], b.data[it])
 
-define_elementwise_mut(`+=`)
-define_elementwise_mut(`-=`)
+defineElementwiseMut(`+=`)
+defineElementwiseMut(`-=`)
 
-template define_scalar_op(op) =
+template defineScalarOp(op) =
   proc op*[T](a: Tensor[T], b: T): Tensor[T] =
-    result = new_tensor[T](a.shape)
+    result = newTensor[T](a.shape)
     for it in 0..<a.len:
       result.data[it] = op(a.data[it], b)
   
   proc op*[T](a: T, b: Tensor[T]): Tensor[T] =
-    result = new_tensor[T](b.shape)
+    result = newTensor[T](b.shape)
     for it in 0..<b.len:
       result.data[it] = op(a, b.data[it])
 
-define_scalar_op(`*`)
-define_scalar_op(`/`)
-define_scalar_op(`div`)
-define_scalar_op(min)
-define_scalar_op(max)
+defineScalarOp(`*`)
+defineScalarOp(`/`)
+defineScalarOp(`div`)
+defineScalarOp(min)
+defineScalarOp(max)
 
-template define_reduce(name, op, initial) =
+template defineReduce(name, op, initial) =
   proc name*[T](tensor: Tensor[T]): T =
     result = T(initial)
     for it in 0..<tensor.len:
       result = op(result, tensor.data[it])
 
-define_reduce(sum, `+`, 0)
-define_reduce(prod, `*`, 1)
+defineReduce(sum, `+`, 0)
+defineReduce(prod, `*`, 1)
 
-template define_reduce(name, op) =
+template defineReduce(name, op) =
   proc name*[T](tensor: Tensor[T]): T =
     assert tensor.len > 0
     result = T(tensor.data[0])
     for it in 1..<tensor.len:
       result = op(result, tensor.data[it])
 
-define_reduce(min, min)
-define_reduce(max, max)
+defineReduce(min, min)
+defineReduce(max, max)
 
 proc squares*[T](tensor: Tensor[T]): Tensor[T] =
-  result = new_tensor[T](tensor.shape)
+  result = newTensor[T](tensor.shape)
   for it in 0..<tensor.len:
     result.data[it] = tensor.data[it] * tensor.data[it]
 
-proc remap*[T](tensor: Tensor[T], from_min, from_max, to_min, to_max: T): Tensor[T] =
-  result = new_tensor[T](tensor.shape)
+proc remap*[T](tensor: Tensor[T], fromMin, fromMax, toMin, toMax: T): Tensor[T] =
+  result = newTensor[T](tensor.shape)
   let
-    from_size = from_max - from_min
-    to_size = to_max - to_min
+    fromSize = fromMax - fromMin
+    toSize = toMax - toMin
   for it in 0..<tensor.len:
-    result.data[it] = (tensor.data[it] - from_min) / from_size * to_size + to_min
+    result.data[it] = (tensor.data[it] - fromMin) / fromSize * toSize + toMin
 
-proc is_matrix*[T](tensor: Tensor[T]): bool {.inline.} =
+proc isMatrix*[T](tensor: Tensor[T]): bool {.inline.} =
   result = tensor.shape.len == 2
 
 proc `*`*[T](a, b: Tensor[T]): Tensor[T] =
   ## Matrix multiplication
-  assert a.is_matrix and b.is_matrix
+  assert a.isMatrix and b.isMatrix
   assert a.shape[0] == b.shape[1]
-  result = new_tensor[T]([a.shape[0], b.shape[1]])
+  result = newTensor[T]([a.shape[0], b.shape[1]])
   for y in 0..<result.shape[0]:
     for it in 0..<a.shape[1]:
       for x in 0..<result.shape[1]:
         result[y, x] += a[y, it] * b[it, x]
 
 proc transpose*[T](tensor: Tensor[T]): Tensor[T] =
-  assert tensor.is_matrix
-  result = new_tensor[T]([tensor.shape[1], tensor.shape[0]])
+  assert tensor.isMatrix
+  result = newTensor[T]([tensor.shape[1], tensor.shape[0]])
   for y in 0..<result.shape[0]:
     for x in 0..<result.shape[1]:
       result[y, x] = tensor[x, y]
 
 proc convert*[A, B](tensor: Tensor[A]): Tensor[B] =
-  result = new_tensor[B](tensor.shape)
+  result = newTensor[B](tensor.shape)
   for it in 0..<tensor.len:
     result[it] = B(tensor.data[it])
 
 template convert*[A](tensor: Tensor[A], B: typedesc): Tensor[B] =
   convert[A, B](tensor)
 
-proc one_hot*[T](indices: Tensor[T], count: int): Tensor[T] =
-  result = new_tensor[T](indices.shape.to_seq() & @[count])
+proc oneHot*[T](indices: Tensor[T], count: int): Tensor[T] =
+  result = newTensor[T](indices.shape.toSeq() & @[count])
   for it in 0..<indices.len:
     result.data[it * count + int(indices.data[it])] = T(1)
 
-proc fill_zero*[T](tensor: Tensor[T]) {.inline.} =
+proc fillZero*[T](tensor: Tensor[T]) {.inline.} =
   if tensor.len > 0:
-    zero_mem(tensor.data[0].addr, sizeof(T) * tensor.len)
+    zeroMem(tensor.data[0].addr, sizeof(T) * tensor.len)
 
 proc fill*[T](tensor: Tensor[T], value: T) {.inline.} =
   for it in 0..<tensor.len:
     tensor.data[it] = value
 
-proc fill_rand*[T](tensor: Tensor[T], slice: HSlice[T, T]) {.inline.} =
+proc fillRand*[T](tensor: Tensor[T], slice: HSlice[T, T]) {.inline.} =
   for it in 0..<tensor.len:
     tensor.data[it] = rand(slice)
 
-proc view_first*[T](tensor: Tensor[T], offset, size: int): Tensor[T] =
+proc viewFirst*[T](tensor: Tensor[T], offset, size: int): Tensor[T] =
   let stride = tensor.len div tensor.shape[0]
   result = Tensor[T](
-    is_view: true,
+    isView: true,
     shape: @[size] & tensor.shape[1..^1],
     len: stride * size,
     data: cast[ptr UncheckedArray[T]](tensor.data[stride * offset].addr)
   )
 
-proc view_first*[T](tensor: Tensor[T], slice: HSlice[int, int]): Tensor[T] =
-  result = tensor.view_first(slice.a, slice.b - slice.a + 1)
+proc viewFirst*[T](tensor: Tensor[T], slice: HSlice[int, int]): Tensor[T] =
+  result = tensor.viewFirst(slice.a, slice.b - slice.a + 1)
 
-proc select_samples*[T](tensor: Tensor[T], idx: openArray[int]): Tensor[T] =
-  result = new_tensor[T](@[idx.len] & tensor.shape[1..^1])
+proc selectSamples*[T](tensor: Tensor[T], idx: openArray[int]): Tensor[T] =
+  result = newTensor[T](@[idx.len] & tensor.shape[1..^1])
   let stride = result.len div idx.len
   for it, id in idx:
-    copy_mem(
+    copyMem(
       result.data[it * stride].addr,
       tensor.data[id * stride].addr,
       stride * sizeof(T)
     )
 
-proc select_random_samples*[T](tensor: Tensor[T], count: int): Tensor[T] =
-  var idx = new_seq[int](count)
+proc selectRandomSamples*[T](tensor: Tensor[T], count: int): Tensor[T] =
+  var idx = newSeq[int](count)
   for id in idx.mitems:
     id = rand(0..<tensor.shape[0])
-  result = tensor.select_samples(idx)
+  result = tensor.selectSamples(idx)
 
-proc shuffle_xy*[T](x, y: Tensor[T]): tuple[x, y: Tensor[T]] =
+proc shuffleXy*[T](x, y: Tensor[T]): tuple[x, y: Tensor[T]] =
   assert x.shape[0] == y.shape[0]
-  var idx = new_seq[int](x.shape[0])
+  var idx = newSeq[int](x.shape[0])
   for it in 0..<idx.len:
     idx[it] = it
   shuffle(idx)
-  result.x = x.select_samples(idx)
-  result.y = y.select_samples(idx)
+  result.x = x.selectSamples(idx)
+  result.y = y.selectSamples(idx)
 
-proc shuffle_xy*[T](tensors: (Tensor[T], Tensor[T])): tuple[x, y: Tensor[T]] =
-  result = shuffle_xy(tensors[0], tensors[1])
+proc shuffleXy*[T](tensors: (Tensor[T], Tensor[T])): tuple[x, y: Tensor[T]] =
+  result = shuffleXy(tensors[0], tensors[1])
 
-proc concat_first*[T](a, b: Tensor[T]): Tensor[T] =
+proc concatFirst*[T](a, b: Tensor[T]): Tensor[T] =
   assert a.shape[1..^1] == b.shape[1..^1]
-  result = new_tensor[T](@[a.shape[0] + b.shape[0]] & a.shape[1..^1])
+  result = newTensor[T](@[a.shape[0] + b.shape[0]] & a.shape[1..^1])
   let stride = result.len div result.shape[0]
   for it in 0..<a.shape[0]:
-    copy_mem(
+    copyMem(
       result.data[it * stride].addr,
       a.data[it * stride].addr,
       stride * sizeof(T)
     )
   for it in 0..<b.shape[0]:
-    copy_mem(
+    copyMem(
       result.data[(it + a.shape[0]) * stride].addr,
       b.data[it * stride].addr,
       stride * sizeof(T)
@@ -323,18 +323,18 @@ proc concat_first*[T](a, b: Tensor[T]): Tensor[T] =
 proc reshape*[T](tensor: Tensor[T], shape: openArray[int]): Tensor[T] =
   var
     len = 1
-    target_shape = new_seq[int](shape.len)
-    var_dim = -1
+    targetShape = newSeq[int](shape.len)
+    varDim = -1
   for dim, size in shape:
     if size < 0:
-      var_dim = dim
+      varDim = dim
     else:
       len *= size
-      target_shape[dim] = size
-  if var_dim != -1:
-    target_shape[var_dim] = tensor.len div len
+      targetShape[dim] = size
+  if varDim != -1:
+    targetShape[varDim] = tensor.len div len
   
-  assert target_shape.prod() == tensor.len
-  result = alloc_tensor[T]()
-  result.alloc_shape(target_shape, fill_zero = false)
-  copy_mem(result.data[0].addr, tensor.data[0].addr, result.len * sizeof(T))
+  assert targetShape.prod() == tensor.len
+  result = allocTensor[T]()
+  result.allocShape(targetShape, fillZero = false)
+  copyMem(result.data[0].addr, tensor.data[0].addr, result.len * sizeof(T))

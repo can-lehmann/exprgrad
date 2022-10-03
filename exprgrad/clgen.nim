@@ -17,7 +17,7 @@
 import std/[strutils, tables, sets]
 import ir
 
-proc make_indent(level: int, width: int = 2): string =
+proc makeIndent(level: int, width: int = 2): string =
   for it in 0..<(level * width):
     result.add(' ')
 
@@ -52,32 +52,32 @@ const NAMES = [
   InstrOr: "||"
 ]
 
-proc to_cl(scalar_type: ScalarType): string =
+proc toCl(scalarType: ScalarType): string =
   const TYPES = [Scalar32: "float", Scalar64: "double"]
-  result = TYPES[scalar_type]
+  result = TYPES[scalarType]
 
-proc nim_int_to_cl(): string = "long"
+proc nimIntToCl(): string = "long"
 
-proc to_cl(typ: Type, ctx: Context): string =
+proc toCl(typ: Type, ctx: Context): string =
   case typ.kind:
     of TypeBoolean: result = "char"
-    of TypeIndex: result = nim_int_to_cl()
-    of TypeScalar: result = ctx.program.scalar_type.to_cl()
+    of TypeIndex: result = nimIntToCl()
+    of TypeScalar: result = ctx.program.scalarType.toCl()
     of TypeArray: raise GeneratorError(msg: $typ.kind & " is not supported by the c generator.")
 
-template with_indent(ctx: Context, body: untyped): untyped =
+template withIndent(ctx: Context, body: untyped): untyped =
   block:
     ctx.indent += 1
     defer: ctx.indent -= 1
     body
 
-proc to_cl(instrs: seq[Instr], ctx: Context): string =
+proc toCl(instrs: seq[Instr], ctx: Context): string =
   for instr in instrs:
     var expr = ""
     case instr.kind:
-      of InstrIndex: expr = $instr.index_lit
-      of InstrScalar: expr = $instr.scalar_lit
-      of InstrBoolean: expr = $ord(instr.boolean_lit)
+      of InstrIndex: expr = $instr.indexLit
+      of InstrScalar: expr = $instr.scalarLit
+      of InstrBoolean: expr = $ord(instr.booleanLit)
       of InstrAdd, InstrSub, InstrMul, InstrDiv,
          InstrIndexDiv, InstrMod,
          InstrEq, InstrLt, InstrLe,
@@ -104,12 +104,12 @@ proc to_cl(instrs: seq[Instr], ctx: Context): string =
           b = ctx.regs[instr.args[2]]
         expr = "(" & cond & " ? " & a & " : " & b & ")"
       of InstrToScalar, InstrToIndex:
-        var target_type = ""
+        var targetType = ""
         case instr.kind:
-          of InstrToScalar: target_type = ctx.program.scalar_type.to_cl()
-          of InstrToIndex: target_type = nim_int_to_cl()
+          of InstrToScalar: targetType = ctx.program.scalarType.toCl()
+          of InstrToIndex: targetType = nimIntToCl()
           else: assert false
-        expr = "((" & target_type & ")" & ctx.regs[instr.args[0]] & ")"
+        expr = "((" & targetType & ")" & ctx.regs[instr.args[0]] & ")"
       of InstrRead:
         let index = ctx.regs[instr.args[0]]
         expr = $instr.tensor & "[" & index & "]"
@@ -125,37 +125,37 @@ proc to_cl(instrs: seq[Instr], ctx: Context): string =
         expr &= "/* " & $instr.tensor & " " & $ctx.program.tensors[instr.tensor].shape & " */"
       of InstrLoop:
         let
-          body = ctx.with_indent(instr.body.to_cl(ctx))
-          iter = ctx.regs[instr.loop_iter]
+          body = ctx.withIndent(instr.body.toCl(ctx))
+          iter = ctx.regs[instr.loopIter]
         if result.len > 0:
           result &= "\n"
-        result &= make_indent(ctx.indent)
-        result &= "for(" & nim_int_to_cl() & " " & iter & " = "
+        result &= makeIndent(ctx.indent)
+        result &= "for(" & nimIntToCl() & " " & iter & " = "
         result &= ctx.regs[instr.args[0]] & "; "
         result &= iter & " < " & ctx.regs[instr.args[1]] & "; "
-        case instr.loop_step:
+        case instr.loopStep:
           of 1: result &= "++" & iter
           of -1: result &= "--" & iter
-          else: result &= iter & " += " & $instr.loop_step
-        result &= ") {\n" & body & "\n" & make_indent(ctx.indent) & "}"
-        result &= " // " & $instr.loop_fuse_next
+          else: result &= iter & " += " & $instr.loopStep
+        result &= ") {\n" & body & "\n" & makeIndent(ctx.indent) & "}"
+        result &= " // " & $instr.loopFuseNext
         continue
       of InstrIf:
         let
-          body = ctx.with_indent(instr.body.to_cl(ctx))
+          body = ctx.withIndent(instr.body.toCl(ctx))
           cond = ctx.regs[instr.args[0]]
         if result.len > 0:
           result &= "\n"
-        result &= make_indent(ctx.indent)
+        result &= makeIndent(ctx.indent)
         result &= "if (" & cond & ") {\n"
-        result &= body & "\n" & make_indent(ctx.indent) & "}"
+        result &= body & "\n" & makeIndent(ctx.indent) & "}"
         continue
       of InstrSharedCache:
         if result.len > 0:
           result &= "\n"
-        result &= make_indent(ctx.indent)
-        result &= "__local " & ctx.program.scalar_type.to_cl() & " "
-        result &= ctx.regs[instr.res] & "[" & $instr.cache_size & "]" & ";"
+        result &= makeIndent(ctx.indent)
+        result &= "__local " & ctx.program.scalarType.toCl() & " "
+        result &= ctx.regs[instr.res] & "[" & $instr.cacheSize & "]" & ";"
         continue
       of InstrCacheWrite:
         let
@@ -179,7 +179,7 @@ proc to_cl(instrs: seq[Instr], ctx: Context): string =
     if instr.res == RegId(0):
       stmt = expr
     elif ctx.regs[instr.res].len > 0:
-      let typ = ctx.kernel.regs[instr.res].typ.to_cl(ctx)
+      let typ = ctx.kernel.regs[instr.res].typ.toCl(ctx)
       stmt = typ & " " & ctx.regs[instr.res] & " = " & expr
     else:
       ctx.regs[instr.res] = expr
@@ -187,44 +187,44 @@ proc to_cl(instrs: seq[Instr], ctx: Context): string =
     
     if result.len > 0:
       result &= "\n"
-    result &= make_indent(ctx.indent) & stmt & ";"
+    result &= makeIndent(ctx.indent) & stmt & ";"
 
-proc to_cl(indices: seq[GpuIndex], ctx: Context): string =
+proc toCl(indices: seq[GpuIndex], ctx: Context): string =
   for it, index in indices:
-    template get_index(reg: RegId, name: string) =
+    template getIndex(reg: RegId, name: string) =
       if ctx.regs[reg].len > 0:
         if result.len > 0:
           result &= "\n"
-        result &= make_indent(ctx.indent) & nim_int_to_cl() & " " & ctx.regs[reg] & " = " & name & "(" & $it & ");"
+        result &= makeIndent(ctx.indent) & nimIntToCl() & " " & ctx.regs[reg] & " = " & name & "(" & $it & ");"
     
-    get_index(index.local, "get_local_id")
-    get_index(index.group, "get_group_id")
+    getIndex(index.local, "get_local_id")
+    getIndex(index.group, "get_group_id")
 
-proc inline_registers(instrs: seq[Instr], usages: var seq[int]) =
+proc inlineRegisters(instrs: seq[Instr], usages: var seq[int]) =
   for instr in instrs:
     for arg in instr.args:
       if usages[arg] != -1:
         usages[arg] += 1
     if instr.body.len > 0:
-      instr.body.inline_registers(usages)
+      instr.body.inlineRegisters(usages)
     case instr.kind:
-      of InstrLoop: usages[instr.loop_iter] += 2
+      of InstrLoop: usages[instr.loopIter] += 2
       of InstrSharedCache: usages[instr.res] += 2
       of InstrIndex, InstrScalar, InstrBoolean:
         usages[instr.res] = -1
       else: discard
 
-proc to_cl*(instrs: seq[Instr],
+proc toCl*(instrs: seq[Instr],
             closure: ParallelClosure,
             indices: seq[GpuIndex],
             kernel: Kernel,
             program: Program): string =
   let ctx = Context(kernel: kernel, program: program)
-  ctx.with_indent:
-    ctx.regs = new_seq[string](kernel.regs.len)
+  ctx.withIndent:
+    ctx.regs = newSeq[string](kernel.regs.len)
     
-    var usages = new_seq[int](kernel.regs.len)
-    instrs.inline_registers(usages)
+    var usages = newSeq[int](kernel.regs.len)
+    instrs.inlineRegisters(usages)
     
     for reg in closure.regs:
       usages[reg] = 2
@@ -235,24 +235,24 @@ proc to_cl*(instrs: seq[Instr],
       if usages[index.group] > 0:
         usages[index.group] = 2
     
-    for it, usage_count in usages:
-      if usage_count > 1:
+    for it, usageCount in usages:
+      if usageCount > 1:
         ctx.regs[it] = $RegId(it + 1)
         if kernel.regs[it].name.len > 0:
           ctx.regs[it] &= "_" & kernel.regs[it].name
     
-    result = indices.to_cl(ctx)
+    result = indices.toCl(ctx)
     if result.len > 0:
       result &= "\n"
-    result &= instrs.to_cl(ctx)
+    result &= instrs.toCl(ctx)
   
   var args: seq[string] = @[]
   for tensor in closure.tensors:
-    args.add("__global " & program.scalar_type.to_cl() & "* " & $tensor)
+    args.add("__global " & program.scalarType.toCl() & "* " & $tensor)
   
   for reg in closure.regs:
-    args.add(kernel.regs[reg].typ.to_cl(ctx) & " " & $reg)
+    args.add(kernel.regs[reg].typ.toCl(ctx) & " " & $reg)
   
-  result = make_indent(ctx.indent) & "__kernel void cl_kernel(" & args.join(", ") & ") {\n" & result
-  result &= "\n" & make_indent(ctx.indent) & "}"
+  result = makeIndent(ctx.indent) & "__kernel void cl_kernel(" & args.join(", ") & ") {\n" & result
+  result &= "\n" & makeIndent(ctx.indent) & "}"
 

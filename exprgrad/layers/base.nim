@@ -34,7 +34,7 @@ proc transpose*(mat: Fun): Fun {.layer.} =
 
 # Optimizers
 
-proc gradient_descent*(param: var Fun, grad: Fun, rate: float64 = 0.01) =
+proc gradientDescent*(param: var Fun, grad: Fun, rate: float64 = 0.01) =
   param{it} ++= -grad{it} * rate | it
 
 proc adam*(param: var Fun, grad: Fun,
@@ -47,21 +47,21 @@ proc adam*(param: var Fun, grad: Fun,
   m{it} ++= m{it} * (beta1 - 1.0) + (1.0 - beta1) * grad{it} | it
   v{it} ++= v{it} * (beta2 - 1.0) + (1.0 - beta2) * sq(grad{it}) | it
   param{it} ++= (
-    let m_hat = m{it} / (1.0 - pow(beta1, to_scalar(epoch())));
-    let v_hat = v{it} / (1.0 - pow(beta2, to_scalar(epoch())));
-    -eta * m_hat / (sqrt(v_hat) + eps)
+    let mHat = m{it} / (1.0 - pow(beta1, toScalar(epoch())));
+    let vHat = v{it} / (1.0 - pow(beta2, toScalar(epoch())));
+    -eta * mHat / (sqrt(vHat) + eps)
   ) | it
 
 # Losses
 
 proc mse*(a, b: Fun): Fun {.layer.} =
-  result[0] ++= sq(a{it} - b{it}) / to_scalar(a.shape[0]) | it
+  result[0] ++= sq(a{it} - b{it}) / toScalar(a.shape[0]) | it
 
-proc binary_cross_entropy*(pred, labels: Fun): Fun {.layer.} =
+proc binaryCrossEntropy*(pred, labels: Fun): Fun {.layer.} =
   result[0] ++= -(
     labels{it} * ln(pred{it}) +
     (1.0 - labels{it}) * ln(1.0 - pred{it})
-  ) / to_scalar(pred.shape[0]) | it
+  ) / toScalar(pred.shape[0]) | it
 
-proc cross_entropy*(pred, labels: Fun): Fun {.layer.} =
-  result[0] ++= -(labels{it} * ln(pred{it})) / to_scalar(pred.shape[0]) | it
+proc crossEntropy*(pred, labels: Fun): Fun {.layer.} =
+  result[0] ++= -(labels{it} * ln(pred{it})) / toScalar(pred.shape[0]) | it

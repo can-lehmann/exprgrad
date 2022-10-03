@@ -16,60 +16,60 @@
 
 import ir, parser
 
-export Scalar, Index, Boolean, literal, iterator_literal
+export Scalar, Index, Boolean, literal, iteratorLiteral
 
-template define_binop(ArgType, ResultType: typedesc, op, instr_kind: untyped) =
+template defineBinop(ArgType, ResultType: typedesc, op, instrKind: untyped) =
   proc op*(a, b: ArgType): ResultType =
     result = ResultType(ExprBuilder(kind: ExprInstr,
-      instr: instr_kind,
+      instr: instrKind,
       children: @[ExprBuilder(a), ExprBuilder(b)]
     ))
 
-template define_unop(ArgType, ResultType: typedesc, op, instr_kind: untyped) =
+template defineUnop(ArgType, ResultType: typedesc, op, instrKind: untyped) =
   proc op*(a: ArgType): ResultType =
     result = ResultType(ExprBuilder(kind: ExprInstr,
-      instr: instr_kind,
+      instr: instrKind,
       children: @[ExprBuilder(a)]
     ))
 
-template define_type(Type: typedesc) =
+template defineType(Type: typedesc) =
   proc literal*(value: Type): Type = value
-  define_binop(Type, Boolean, `==`, InstrEq)
+  defineBinop(Type, Boolean, `==`, InstrEq)
 
-template define_number(Type: typedesc) {.dirty.} =
-  define_binop(Type, Type, `+`, InstrAdd)
-  define_binop(Type, Type, `-`, InstrSub)
-  define_binop(Type, Type, `*`, InstrMul)
-  define_unop(Type, Type, `-`, InstrNegate)
+template defineNumber(Type: typedesc) {.dirty.} =
+  defineBinop(Type, Type, `+`, InstrAdd)
+  defineBinop(Type, Type, `-`, InstrSub)
+  defineBinop(Type, Type, `*`, InstrMul)
+  defineUnop(Type, Type, `-`, InstrNegate)
   
-  define_binop(Type, Boolean, `<`, InstrLt)
-  define_binop(Type, Boolean, `<=`, InstrLe)
+  defineBinop(Type, Boolean, `<`, InstrLt)
+  defineBinop(Type, Boolean, `<=`, InstrLe)
 
-define_type(Boolean)
-define_binop(Boolean, Boolean, `and`, InstrAnd)
-define_binop(Boolean, Boolean, `or`, InstrAnd)
+defineType(Boolean)
+defineBinop(Boolean, Boolean, `and`, InstrAnd)
+defineBinop(Boolean, Boolean, `or`, InstrAnd)
 
-define_type(Scalar)
-define_number(Scalar)
-define_binop(Scalar, Scalar, `/`, InstrDiv)
-define_unop(Scalar, Scalar, sin, InstrSin)
-define_unop(Scalar, Scalar, cos, InstrCos)
-define_unop(Scalar, Scalar, exp, InstrExp)
-define_binop(Scalar, Scalar, pow, InstrPow)
-define_unop(Scalar, Scalar, sqrt, InstrSqrt)
-define_binop(Scalar, Scalar, log, InstrLog)
-define_unop(Scalar, Scalar, log10, InstrLog10)
-define_unop(Scalar, Scalar, log2, InstrLog2)
-define_unop(Scalar, Scalar, ln, InstrLn)
+defineType(Scalar)
+defineNumber(Scalar)
+defineBinop(Scalar, Scalar, `/`, InstrDiv)
+defineUnop(Scalar, Scalar, sin, InstrSin)
+defineUnop(Scalar, Scalar, cos, InstrCos)
+defineUnop(Scalar, Scalar, exp, InstrExp)
+defineBinop(Scalar, Scalar, pow, InstrPow)
+defineUnop(Scalar, Scalar, sqrt, InstrSqrt)
+defineBinop(Scalar, Scalar, log, InstrLog)
+defineUnop(Scalar, Scalar, log10, InstrLog10)
+defineUnop(Scalar, Scalar, log2, InstrLog2)
+defineUnop(Scalar, Scalar, ln, InstrLn)
 
-define_type(Index)
-define_number(Index)
-define_binop(Index, Index, `div`, InstrIndexDiv)
-define_binop(Index, Index, `mod`, InstrMod)
-define_binop(Index, Index, wrap, InstrWrap)
+defineType(Index)
+defineNumber(Index)
+defineBinop(Index, Index, `div`, InstrIndexDiv)
+defineBinop(Index, Index, `mod`, InstrMod)
+defineBinop(Index, Index, wrap, InstrWrap)
 
-define_unop(Scalar, Index, to_index, InstrToIndex)
-define_unop(Index, Scalar, to_scalar, InstrToScalar)
+defineUnop(Scalar, Index, toIndex, InstrToIndex)
+defineUnop(Index, Scalar, toScalar, InstrToScalar)
 
 proc epoch*(): Index =
   result = Index(ExprBuilder(kind: ExprInstr, instr: InstrEpoch))
@@ -100,7 +100,7 @@ proc `[]`*(tensor: Fun, indices: varargs[Index]): Scalar =
 
 proc `{}`*(tensor: Fun, index: Index): Scalar =
   let builder = ExprBuilder(kind: ExprRead,
-    is_raw: true,
+    isRaw: true,
     tensor: tensor,
     children: @[ExprBuilder(index)]
   )
@@ -141,6 +141,6 @@ proc max*(x, y: Scalar): Scalar =
 proc min*(x, y: Scalar): Scalar =
   result = select(x < y, x, y)
 
-converter to_boolean*(x: bool): Boolean = literal(x)
-converter to_index*(x: int): Index = literal(x)
-converter to_scalar*(x: float): Scalar = literal(x)
+converter toBoolean*(x: bool): Boolean = literal(x)
+converter toIndex*(x: int): Index = literal(x)
+converter toScalar*(x: float): Scalar = literal(x)

@@ -30,19 +30,19 @@ type
     nodes: seq[Node]
     edges: seq[Edge]
 
-proc escape_value(val: string): string =
-  result = new_string_of_cap(val.len)
+proc escapeValue(val: string): string =
+  result = newStringOfCap(val.len)
   for chr in val:
     case chr:
       of '\"': result.add("\\\"")
       else: result.add(chr)
 
-proc format_attrs(attrs: openArray[(string, string)]): string =
+proc formatAttrs(attrs: openArray[(string, string)]): string =
   result = "["
   for it, (name, value) in attrs:
     if it != 0:
       result &= ", "
-    result &= name & "=\"" & value.escape_value() & "\""
+    result &= name & "=\"" & value.escapeValue() & "\""
   result &= "]"
 
 proc `$`(graph: DotGraph): string =
@@ -50,27 +50,27 @@ proc `$`(graph: DotGraph): string =
   for node in graph.nodes:
     result &= "\n\t" & node.name
     if node.attrs.len > 0:
-      result &= " " & format_attrs(node.attrs)
+      result &= " " & formatAttrs(node.attrs)
     result &= ";"
   for edge in graph.edges:
     result &= "\n\t" & edge.a & " -> " & edge.b
     if edge.attrs.len > 0:
-      result &= " " & format_attrs(edge.attrs)
+      result &= " " & formatAttrs(edge.attrs)
     result &= ";"
   result &= "\n}"
 
-proc to_dot_graph*(program: Program, target: string): string =
-  program.assert_gen("to_dot_graph", requires={})
+proc toDotGraph*(program: Program, target: string): string =
+  program.assertGen("toDotGraph", requires={})
   
   var
     graph = DotGraph()
-    deps = init_table[TensorId, HashSet[TensorId]]()
-    tensors = init_hash_set[TensorId]()
+    deps = initTable[TensorId, HashSet[TensorId]]()
+    tensors = initHashSet[TensorId]()
   
   for kernel in program.targets[target].kernels:
     var
-      inputs = init_hash_set[TensorId]()
-      outputs = init_hash_set[TensorId]()
+      inputs = initHashSet[TensorId]()
+      outputs = initHashSet[TensorId]()
     for read in kernel.reads:
       inputs.incl(read.tensor)
     if kernel.write.tensor != TensorId(0):
@@ -80,7 +80,7 @@ proc to_dot_graph*(program: Program, target: string): string =
     
     for outp in outputs:
       if outp notin deps:
-        deps[outp] = init_hash_set[TensorId]()
+        deps[outp] = initHashSet[TensorId]()
       for inp in inputs:
         deps[outp].incl(inp)
     tensors.incl(inputs)
@@ -92,7 +92,7 @@ proc to_dot_graph*(program: Program, target: string): string =
     if label.len == 0:
       label = $tensor
     if def.kind != TensorResult:
-      label = ($def.kind)[len("Tensor")..^1].to_lower_ascii() & " " & label
+      label = ($def.kind)[len("Tensor")..^1].toLowerAscii() & " " & label
     if def.shape.len > 0:
       label &= " " & $def.shape
     graph.nodes.add(Node(name: $tensor, attrs: @{

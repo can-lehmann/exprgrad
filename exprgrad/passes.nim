@@ -17,212 +17,212 @@
 import std/[tables, algorithm, sets, math, rationals, sequtils, strutils, sugar]
 import ir, irprint
 
-proc infer_types(instrs: seq[Instr], regs: var seq[Register]) =
+proc inferTypes(instrs: seq[Instr], regs: var seq[Register]) =
   for instr in instrs:
-    template ret_type(): var Type = regs[instr.res].typ
-    template arg_type(index: int): Type = regs[instr.args[index]].typ
+    template retType(): var Type = regs[instr.res].typ
+    template argType(index: int): Type = regs[instr.args[index]].typ
     
     case instr.kind:
-      of InstrIndex: ret_type = Type(kind: TypeIndex, count: 1)
-      of InstrScalar: ret_type = Type(kind: TypeScalar, count: 1)
-      of InstrBoolean: ret_type = Type(kind: TypeBoolean, count: 1)
+      of InstrIndex: retType = Type(kind: TypeIndex, count: 1)
+      of InstrScalar: retType = Type(kind: TypeScalar, count: 1)
+      of InstrBoolean: retType = Type(kind: TypeBoolean, count: 1)
       of InstrAdd, InstrSub, InstrMul,
          InstrEq, InstrLe, InstrLt:
-        let (a, b) = (arg_type(0), arg_type(1))
+        let (a, b) = (argType(0), argType(1))
         if a != b:
           raise TypeError(msg: "Arguments of " & $instr.kind & " must have the same type, but got " & $a & " and " & $b & " instead.")
         case instr.kind:
           of InstrEq, InstrLe, InstrLt:
-            ret_type = Type(kind: TypeBoolean, count: a.count)
-          else: ret_type = a
+            retType = Type(kind: TypeBoolean, count: a.count)
+          else: retType = a
       of InstrDiv:
-        if arg_type(0).kind != TypeScalar or arg_type(0).kind != TypeScalar:
+        if argType(0).kind != TypeScalar or argType(0).kind != TypeScalar:
           raise TypeError(msg: "Arguments of " & $instr.kind & " must be of type Scalar.")
-        ret_type = arg_type(0)
+        retType = argType(0)
       of InstrIndexDiv, InstrMod, InstrWrap:
-        if arg_type(0).kind != TypeIndex or arg_type(0).kind != TypeIndex:
+        if argType(0).kind != TypeIndex or argType(0).kind != TypeIndex:
           raise TypeError(msg: "Arguments of " & $instr.kind & " must be of type Index.")
-        ret_type = arg_type(0)
+        retType = argType(0)
       of InstrNegate:
-        if arg_type(0).kind notin {TypeScalar, TypeIndex}:
+        if argType(0).kind notin {TypeScalar, TypeIndex}:
           raise TypeError(msg: "Argument to " & $instr.kind & " must be a Scalar or an Index")
-        ret_type = arg_type(0)
+        retType = argType(0)
       of InstrAnd, InstrOr:
-        if arg_type(0).kind != TypeBoolean or arg_type(0).kind != TypeBoolean:
+        if argType(0).kind != TypeBoolean or argType(0).kind != TypeBoolean:
           raise TypeError(msg: "Arguments of " & $instr.kind & " must be of type Boolean.")
-        ret_type = arg_type(0)
+        retType = argType(0)
       of InstrSelect:
-        let (cond, a, b) = (arg_type(0), arg_type(1), arg_type(2))
+        let (cond, a, b) = (argType(0), argType(1), argType(2))
         if a != b:
           raise TypeError(msg: "The second and the third argument of " & $instr.kind & " must have the same type")
         if cond.kind != TypeBoolean:
           raise TypeError(msg: "The first argument of " & $instr.kind & " must be a Boolean")
         if cond.count != a.count:
           raise TypeError(msg: "All arguments of " & $instr.kind & " must have the same count")
-        ret_type = a
+        retType = a
       of InstrToScalar:
-        if arg_type(0).kind notin {TypeIndex}:
-          raise TypeError(msg: "Unable to convert " & $arg_type(0) & " to Scalar")
-        ret_type = Type(kind: TypeScalar, count: arg_type(0).count)
+        if argType(0).kind notin {TypeIndex}:
+          raise TypeError(msg: "Unable to convert " & $argType(0) & " to Scalar")
+        retType = Type(kind: TypeScalar, count: argType(0).count)
       of InstrToIndex:
-        if arg_type(0).kind notin {TypeScalar}:
-          raise TypeError(msg: "Unable to convert " & $arg_type(0) & " to Index")
-        ret_type = Type(kind: TypeIndex, count: arg_type(0).count)
+        if argType(0).kind notin {TypeScalar}:
+          raise TypeError(msg: "Unable to convert " & $argType(0) & " to Index")
+        retType = Type(kind: TypeIndex, count: argType(0).count)
       of InstrSin, InstrCos, InstrExp, InstrPow, InstrSqrt,
          InstrLog, InstrLog10, InstrLog2, InstrLn:
         for it in 0..<instr.args.len:
-          if arg_type(it).kind != TypeScalar:
-            raise TypeError(msg: "Argument " & $it & " to " & $instr.kind & " is currently of type " & $arg_type(it) & ", but must be of type Scalar.")
-        ret_type = arg_type(0)
+          if argType(it).kind != TypeScalar:
+            raise TypeError(msg: "Argument " & $it & " to " & $instr.kind & " is currently of type " & $argType(it) & ", but must be of type Scalar.")
+        retType = argType(0)
       of InstrShape, InstrLen, InstrShapeLen:
-        ret_type = Type(kind: TypeIndex, count: 1)
+        retType = Type(kind: TypeIndex, count: 1)
       of InstrArray:
         for it in 1..<instr.args.len:
-          if arg_type(it) != arg_type(0):
+          if argType(it) != argType(0):
             raise TypeError(msg: "All items in array must be of the same type")
-        ret_type = Type(kind: TypeArray,
+        retType = Type(kind: TypeArray,
           count: 1,
           len: instr.args.len,
-          item: arg_type(0)
+          item: argType(0)
         )
       of InstrArrayLen:
-        if arg_type(0).kind != TypeArray:
+        if argType(0).kind != TypeArray:
           raise TypeError(msg: "Argument to " & $instr.kind & " must be an array")
-        ret_type = Type(kind: TypeIndex, count: arg_type(0).count)
+        retType = Type(kind: TypeIndex, count: argType(0).count)
       of InstrArrayRead:
-        if arg_type(0).kind != TypeArray:
+        if argType(0).kind != TypeArray:
           raise TypeError(msg: "First argument to " & $instr.kind & " must be an array")
-        if arg_type(1).kind != TypeIndex:
+        if argType(1).kind != TypeIndex:
           raise TypeError(msg: "Second argument to " & $instr.kind & " must be an index")
-        if arg_type(0).count != arg_type(1).count:
+        if argType(0).count != argType(1).count:
           raise TypeError() 
-        ret_type = arg_type(0).item
+        retType = argType(0).item
       of InstrRead, InstrWrite, InstrOverwrite:
         if instr.tensor == TensorId(0):
           raise TypeError(msg: $instr.kind & " must have a tensor argument")
-        if arg_type(0).kind != TypeIndex:
+        if argType(0).kind != TypeIndex:
           raise TypeError(msg: "First argument to " & $instr.kind & " must be an Index")
         case instr.kind:
-          of InstrRead: ret_type = Type(kind: TypeScalar, count: 1)
+          of InstrRead: retType = Type(kind: TypeScalar, count: 1)
           of InstrWrite:
-            if arg_type(1).kind != TypeScalar:
+            if argType(1).kind != TypeScalar:
               raise TypeError(msg: "Second argument of " & $instr.kind & " must be a Scalar")
           else: discard
-      of InstrEpoch: ret_type = Type(kind: TypeIndex, count: 1)
+      of InstrEpoch: retType = Type(kind: TypeIndex, count: 1)
       of InstrLoop:
-        if arg_type(0).kind != TypeIndex or arg_type(1).kind != TypeIndex:
-          raise TypeError(msg: "Loop bounds must be of type Index, but are currently of types " & $arg_type(0) & " and " & $arg_type(1))
-        regs[instr.loop_iter].typ = Type(kind: TypeIndex, count: 1)
-        instr.body.infer_types(regs)
+        if argType(0).kind != TypeIndex or argType(1).kind != TypeIndex:
+          raise TypeError(msg: "Loop bounds must be of type Index, but are currently of types " & $argType(0) & " and " & $argType(1))
+        regs[instr.loopIter].typ = Type(kind: TypeIndex, count: 1)
+        instr.body.inferTypes(regs)
       of InstrThreads:
-        if arg_type(0).kind != TypeIndex or arg_type(1).kind != TypeIndex:
+        if argType(0).kind != TypeIndex or argType(1).kind != TypeIndex:
           raise TypeError(msg: "Thread range must be of type Index")
-        regs[instr.threads_begin].typ = Type(kind: TypeIndex, count: 1)
-        regs[instr.threads_end].typ = Type(kind: TypeIndex, count: 1)
-        instr.body.infer_types(regs)
+        regs[instr.threadsBegin].typ = Type(kind: TypeIndex, count: 1)
+        regs[instr.threadsEnd].typ = Type(kind: TypeIndex, count: 1)
+        instr.body.inferTypes(regs)
       of InstrGpu:
         for it, arg in instr.args:
-          if arg_type(it).kind != TypeIndex:
+          if argType(it).kind != TypeIndex:
             raise TypeError(msg: "Gpu ranges must be of type Index")
-        for index in instr.gpu_indices:
+        for index in instr.gpuIndices:
           regs[index.group].typ = Type(kind: TypeIndex, count: 1)
           regs[index.local].typ = Type(kind: TypeIndex, count: 1)
-        instr.body.infer_types(regs)
+        instr.body.inferTypes(regs)
       of InstrIf:
-        if arg_type(0).kind != TypeBoolean:
+        if argType(0).kind != TypeBoolean:
           raise TypeError(msg: "If condition must be of type Boolean")
-        instr.body.infer_types(regs)
+        instr.body.inferTypes(regs)
       of InstrSharedCache:
-        ret_type = Type(kind: TypeArray,
+        retType = Type(kind: TypeArray,
           count: 1,
-          len: instr.cache_size,
+          len: instr.cacheSize,
           item: Type(kind: TypeScalar, count: 1)
         )
       of InstrCacheWrite:
-        if arg_type(0).kind != TypeArray:
+        if argType(0).kind != TypeArray:
           raise TypeError(msg: "Local cache must be of type Array")
-        if arg_type(1).kind != TypeIndex:
+        if argType(1).kind != TypeIndex:
           raise TypeError(msg: "Index into local cache must be of type Index")
-        if arg_type(2).kind != TypeScalar:
+        if argType(2).kind != TypeScalar:
           raise TypeError(msg: "Third argument of " & $instr.kind & " must be of type Scalar")
       of InstrBarrier: discard
 
-proc infer_types(expr: Expr, regs: var seq[Register]) =
-  expr.instrs.infer_types(regs)
+proc inferTypes(expr: Expr, regs: var seq[Register]) =
+  expr.instrs.inferTypes(regs)
 
-proc infer_types(index: LinearIndex, regs: var seq[Register]) =
-  index.setup.infer_types(regs)
+proc inferTypes(index: LinearIndex, regs: var seq[Register]) =
+  index.setup.inferTypes(regs)
   for reg, factor in index.factors:
     if regs[reg].typ.kind != TypeIndex:
       raise TypeError(msg: "LinearIndex factor have the type Index")
 
-proc infer_types(tensor_op: TensorOp, regs: var seq[Register]) =
-  for dim in tensor_op.dims:
-    dim.infer_types(regs)
-  if tensor_op.is_raw and tensor_op.dims.len != 1:
+proc inferTypes(tensorOp: TensorOp, regs: var seq[Register]) =
+  for dim in tensorOp.dims:
+    dim.inferTypes(regs)
+  if tensorOp.isRaw and tensorOp.dims.len != 1:
     raise TypeError(msg: "A raw tensor operation must have exactly one index")
 
-proc infer_types*(kernel: Kernel) =
+proc inferTypes*(kernel: Kernel) =
   if kernel.generator.kind == GenNone:
-    kernel.setup.infer_types(kernel.regs)
+    kernel.setup.inferTypes(kernel.regs)
     for loop in kernel.loops:
-      loop.start.infer_types(kernel.regs)
-      loop.stop.infer_types(kernel.regs)
+      loop.start.inferTypes(kernel.regs)
+      loop.stop.inferTypes(kernel.regs)
       kernel.regs[loop.iter].typ = Type(kind: TypeIndex, count: 1)
     for cond in kernel.conds:
-      cond.infer_types(kernel.regs)
+      cond.inferTypes(kernel.regs)
       if kernel.regs[cond.res].typ.kind != TypeBoolean:
         raise TypeError(msg: "Condition must be of type Boolean")
     for read in kernel.reads:
-      read.infer_types(kernel.regs)
+      read.inferTypes(kernel.regs)
       kernel.regs[read.data].typ = Type(kind: TypeScalar, count: 1)
-    kernel.expr.infer_types(kernel.regs)
-    kernel.write.infer_types(kernel.regs)
+    kernel.expr.inferTypes(kernel.regs)
+    kernel.write.inferTypes(kernel.regs)
     if kernel.write.data != RegId(0) and
        kernel.regs[kernel.write.data].typ.kind != TypeScalar:
       raise TypeError(msg: "Kernel must write a Scalar to the output tensor")
 
-proc infer_types*(program: Program) =
-  program.assert_pass("infer_types",
+proc inferTypes*(program: Program) =
+  program.assertPass("inferTypes",
     produces={StageTyped},
     preserves=ALL_STAGES
   )
   
   for name, target in program.targets:
     for kernel in target.kernels:
-      kernel.infer_types()
+      kernel.inferTypes()
 
-proc fold_setup(index: var LinearIndex, kernel: Kernel) =
-  var regs = new_seq[LinearIndex](kernel.regs.len)
+proc foldSetup(index: var LinearIndex, kernel: Kernel) =
+  var regs = newSeq[LinearIndex](kernel.regs.len)
   for loop in kernel.loops:
     # TODO: How should we handle registers defined in the setup section of the kernel?
     regs[loop.iter] = LinearIndex(
-      factors: to_table({loop.iter: 1})
+      factors: toTable({loop.iter: 1})
     )
   
   for instr in index.setup:
-    template binary_op(op) =
+    template binaryOp(op) =
       regs[instr.res] = op(regs[instr.args[0]], regs[instr.args[1]])
     
-    template unary_op(op) =
+    template unaryOp(op) =
       regs[instr.res] = op(regs[instr.args[0]])
     
     case instr.kind:
-      of InstrIndex: regs[instr.res] = init_linear_index(instr.index_lit)
-      of InstrAdd: binary_op(`+`)
-      of InstrSub: binary_op(`-`)
-      of InstrMul: binary_op(`*`)
-      of InstrNegate: unary_op(`-`)
+      of InstrIndex: regs[instr.res] = initLinearIndex(instr.indexLit)
+      of InstrAdd: binaryOp(`+`)
+      of InstrSub: binaryOp(`-`)
+      of InstrMul: binaryOp(`*`)
+      of InstrNegate: unaryOp(`-`)
       else:
         regs[instr.res] = LinearIndex(
-          factors: to_table({instr.res: 1})
+          factors: toTable({instr.res: 1})
         )
   
   var sum = LinearIndex()
   for reg, factor in index.factors:
     sum = sum + regs[reg] * factor
   
-  var used = new_seq[bool](kernel.regs.len)
+  var used = newSeq[bool](kernel.regs.len)
   for reg, factor in sum.factors:
     used[reg] = true
   
@@ -236,89 +236,89 @@ proc fold_setup(index: var LinearIndex, kernel: Kernel) =
   sum.setup.reverse()
   index = sum
 
-proc fold_linear_indices(kernel: Kernel) =
+proc foldLinearIndices(kernel: Kernel) =
   for loop in kernel.loops.mitems:
-    loop.start.fold_setup(kernel)
-    loop.stop.fold_setup(kernel)
+    loop.start.foldSetup(kernel)
+    loop.stop.foldSetup(kernel)
   for read in kernel.reads.mitems:
     for dim in read.dims.mitems:
-      dim.fold_setup(kernel)
+      dim.foldSetup(kernel)
   for dim in kernel.write.dims.mitems:
-    dim.fold_setup(kernel)
+    dim.foldSetup(kernel)
 
-proc fold_linear_indices*(program: Program) =
-  program.assert_pass("fold_linear_indices",
+proc foldLinearIndices*(program: Program) =
+  program.assertPass("foldLinearIndices",
     produces={StageFolded},
     preserves={StageTensors}
   )
   
   for name, target in program.targets:
     for kernel in target.kernels:
-      kernel.fold_linear_indices()
-      if kernel.grad.is_custom:
-        for grad_kernel in kernel.grad.kernels:
-          grad_kernel.fold_linear_indices()
+      kernel.foldLinearIndices()
+      if kernel.grad.isCustom:
+        for gradKernel in kernel.grad.kernels:
+          gradKernel.foldLinearIndices()
 
-proc dead_code_elim(instrs: var seq[Instr], used: var seq[bool]) =
+proc deadCodeElim(instrs: var seq[Instr], used: var seq[bool]) =
   var it = instrs.len - 1
   while it >= 0:
     let instr = instrs[it]
-    let is_instr_used = used[instr.res] or instr.kind in SIDE_EFFECT_INSTRS
-    if is_instr_used:
+    let isInstrUsed = used[instr.res] or instr.kind in SIDE_EFFECT_INSTRS
+    if isInstrUsed:
       for arg in instr.args:
         used[arg] = true
     else:
       instrs.delete(it)
     it -= 1
 
-proc dead_code_elim(index: var LinearIndex, used: var seq[bool]) =
+proc deadCodeElim(index: var LinearIndex, used: var seq[bool]) =
   for reg, factor in index.factors:
     used[reg] = true
-  index.setup.dead_code_elim(used)
+  index.setup.deadCodeElim(used)
 
-proc dead_code_elim(loops: var seq[Loop], used: var seq[bool]) =
+proc deadCodeElim(loops: var seq[Loop], used: var seq[bool]) =
   for it in countdown(loops.len - 1, 0):
-    loops[it].start.dead_code_elim(used)
-    loops[it].stop.dead_code_elim(used)
+    loops[it].start.deadCodeElim(used)
+    loops[it].stop.deadCodeElim(used)
 
-proc dead_code_elim(reads: var seq[TensorOp], used: var seq[bool]) =
+proc deadCodeElim(reads: var seq[TensorOp], used: var seq[bool]) =
   var it = 0
   while it < reads.len:
     if not used[reads[it].data]:
       reads.delete(it)
     else:
       for dim in reads[it].dims.mitems:
-        dim.dead_code_elim(used)
+        dim.deadCodeElim(used)
       it += 1
 
-proc dead_code_elim*(kernel: Kernel) =
+proc deadCodeElim*(kernel: Kernel) =
   if kernel.generator.kind == GenNone:
-    var used = new_seq[bool](kernel.regs.len)
+    var used = newSeq[bool](kernel.regs.len)
     used[kernel.write.data] = true
     for dim in kernel.write.dims.mitems:
-      dim.dead_code_elim(used)
-    kernel.expr.instrs.dead_code_elim(used)
-    kernel.reads.dead_code_elim(used)
-    kernel.loops.dead_code_elim(used)
-    kernel.setup.dead_code_elim(used)
+      dim.deadCodeElim(used)
+    kernel.expr.instrs.deadCodeElim(used)
+    kernel.reads.deadCodeElim(used)
+    kernel.loops.deadCodeElim(used)
+    kernel.setup.deadCodeElim(used)
 
-proc dead_code_elim*(program: Program) =
-  program.assert_pass("dead_code_elim",
+proc deadCodeElim*(program: Program) =
+  program.assertPass("deadCodeElim",
     produces={},
     preserves=ALL_STAGES
   )
   
   for name, target in program.targets:
     for kernel in target.kernels:
-      kernel.dead_code_elim()
-      if kernel.grad.is_custom:
-        for grad_kernel in kernel.grad.kernels:
-          grad_kernel.dead_code_elim()
+      kernel.deadCodeElim()
+      if kernel.grad.isCustom:
+        for gradKernel in kernel.grad.kernels:
+          gradKernel.deadCodeElim()
 
-proc dead_kernel_elim*(program: Program) =
+proc deadKernelElim*(program: Program) =
   for name, target in program.targets.mpairs:
     var
-      used = new_seq[bool](program.tensors.len)
+      used = newSeq[bool](program.tensors.len)
       it = target.kernels.len - 1
     
     for it, tensor in program.tensors:
@@ -336,151 +336,151 @@ proc dead_kernel_elim*(program: Program) =
         target.kernels.delete(it)
       it -= 1
 
-proc deduplicate_reads*(kernel: Kernel) =
+proc deduplicateReads*(kernel: Kernel) =
   var
-    unique = init_table[TensorOp, RegId]()
-    subs = init_table[RegId, RegId]()
+    unique = initTable[TensorOp, RegId]()
+    subs = initTable[RegId, RegId]()
     it = 0
   while it < kernel.reads.len:
-    var base_read = kernel.reads[it]
-    base_read.data = RegId(0)
-    if base_read in unique:
-      subs[kernel.reads[it].data] = unique[base_read]
+    var baseRead = kernel.reads[it]
+    baseRead.data = RegId(0)
+    if baseRead in unique:
+      subs[kernel.reads[it].data] = unique[baseRead]
       kernel.reads.delete(it)
     else:
-      unique[base_read] = kernel.reads[it].data
+      unique[baseRead] = kernel.reads[it].data
       it += 1
   
   kernel.expr.substitute(subs)
   kernel.write.substitute(subs)
 
-proc deduplicate_reads*(program: Program) =
-  program.assert_pass("deduplicate_reads",
+proc deduplicateReads*(program: Program) =
+  program.assertPass("deduplicateReads",
     produces={},
     preserves=ALL_STAGES
   )
   
   for name, target in program.targets:
     for kernel in target.kernels:
-      kernel.deduplicate_reads()
-      if kernel.grad.is_custom:
-        for grad_kernel in kernel.grad.kernels:
-          grad_kernel.deduplicate_reads()
+      kernel.deduplicateReads()
+      if kernel.grad.isCustom:
+        for gradKernel in kernel.grad.kernels:
+          gradKernel.deduplicateReads()
 
 proc derive(instrs: seq[Instr],
             regs: var seq[Register],
-            grad_regs: var Table[RegId, RegId]): seq[Instr] =
+            gradRegs: var Table[RegId, RegId]): seq[Instr] =
   for it in countdown(instrs.len - 1, 0):
     let instr = instrs[it]
-    if instr.res notin grad_regs:
+    if instr.res notin gradRegs:
       continue
-    let grad = grad_regs[instr.res]
-    var grad_args = new_seq[RegId]()
+    let grad = gradRegs[instr.res]
+    var gradArgs = newSeq[RegId]()
     case instr.kind:
       of InstrAdd:
-        grad_args = @[grad, grad]
+        gradArgs = @[grad, grad]
       of InstrSub:
-        let neg_grad = regs.alloc()
-        result.add(Instr(kind: InstrNegate, args: @[grad], res: neg_grad))
-        grad_args = @[grad, neg_grad]
+        let negGrad = regs.alloc()
+        result.add(Instr(kind: InstrNegate, args: @[grad], res: negGrad))
+        gradArgs = @[grad, negGrad]
       of InstrMul:
-        let (grad_a, grad_b) = (regs.alloc(), regs.alloc())
-        result.add(Instr(kind: InstrMul, args: @[grad, instr.args[1]], res: grad_a))
-        result.add(Instr(kind: InstrMul, args: @[grad, instr.args[0]], res: grad_b))
-        grad_args = @[grad_a, grad_b]
+        let (gradA, gradB) = (regs.alloc(), regs.alloc())
+        result.add(Instr(kind: InstrMul, args: @[grad, instr.args[1]], res: gradA))
+        result.add(Instr(kind: InstrMul, args: @[grad, instr.args[0]], res: gradB))
+        gradArgs = @[gradA, gradB]
       of InstrDiv:
         # d/dx (x / y) = 1 / y
         # d/dy (x / y) = d/dy (x * y ^ -1) = -x * y ^ -2
         let
-          (grad_a, grad_b) = (regs.alloc(), regs.alloc())
-          (neg_x, sq_y, div_grad_sq_y) = (regs.alloc(), regs.alloc(), regs.alloc())
-        result.add(Instr(kind: InstrDiv, args: @[grad, instr.args[1]], res: grad_a))
-        result.add(Instr(kind: InstrMul, args: @[instr.args[1], instr.args[1]], res: sq_y))
-        result.add(Instr(kind: InstrDiv, args: @[grad, sq_y], res: div_grad_sq_y))
-        result.add(Instr(kind: InstrNegate, args: @[instr.args[0]], res: neg_x))
-        result.add(Instr(kind: InstrMul, args: @[neg_x, div_grad_sq_y], res: grad_b))
-        grad_args = @[grad_a, grad_b]
+          (gradA, gradB) = (regs.alloc(), regs.alloc())
+          (negX, sqY, divGradSqY) = (regs.alloc(), regs.alloc(), regs.alloc())
+        result.add(Instr(kind: InstrDiv, args: @[grad, instr.args[1]], res: gradA))
+        result.add(Instr(kind: InstrMul, args: @[instr.args[1], instr.args[1]], res: sqY))
+        result.add(Instr(kind: InstrDiv, args: @[grad, sqY], res: divGradSqY))
+        result.add(Instr(kind: InstrNegate, args: @[instr.args[0]], res: negX))
+        result.add(Instr(kind: InstrMul, args: @[negX, divGradSqY], res: gradB))
+        gradArgs = @[gradA, gradB]
       of InstrNegate:
-        let neg_grad = regs.alloc()
-        result.add(Instr(kind: InstrNegate, args: @[grad], res: neg_grad))
-        grad_args = @[neg_grad]
+        let negGrad = regs.alloc()
+        result.add(Instr(kind: InstrNegate, args: @[grad], res: negGrad))
+        gradArgs = @[negGrad]
       of InstrLn:
-        let grad_x = regs.alloc()
-        result.add(Instr(kind: InstrDiv, args: @[grad, instr.args[0]], res: grad_x))
-        grad_args = @[grad_x]
+        let gradX = regs.alloc()
+        result.add(Instr(kind: InstrDiv, args: @[grad, instr.args[0]], res: gradX))
+        gradArgs = @[gradX]
       of InstrExp:
-        let grad_x = regs.alloc()
-        result.add(Instr(kind: InstrMul, args: @[grad, instr.res], res: grad_x))
-        grad_args = @[grad_x]
+        let gradX = regs.alloc()
+        result.add(Instr(kind: InstrMul, args: @[grad, instr.res], res: gradX))
+        gradArgs = @[gradX]
       of InstrSin:
-        let (cos, grad_x) = (regs.alloc(), regs.alloc())
+        let (cos, gradX) = (regs.alloc(), regs.alloc())
         result.add(Instr(kind: InstrCos, args: @[instr.args[0]], res: cos))
-        result.add(Instr(kind: InstrMul, args: @[cos, grad], res: grad_x))
-        grad_args = @[grad_x]
+        result.add(Instr(kind: InstrMul, args: @[cos, grad], res: gradX))
+        gradArgs = @[gradX]
       of InstrCos:
-        let (sin, neg_sin, grad_x) = (regs.alloc(), regs.alloc(), regs.alloc())
+        let (sin, negSin, gradX) = (regs.alloc(), regs.alloc(), regs.alloc())
         result.add(Instr(kind: InstrSin, args: @[instr.args[0]], res: sin))
-        result.add(Instr(kind: InstrNegate, args: @[sin], res: neg_sin))
-        result.add(Instr(kind: InstrMul, args: @[neg_sin, grad], res: grad_x))
-        grad_args = @[grad_x]
+        result.add(Instr(kind: InstrNegate, args: @[sin], res: negSin))
+        result.add(Instr(kind: InstrMul, args: @[negSin, grad], res: gradX))
+        gradArgs = @[gradX]
       of InstrSelect:
-        let (grad_a, grad_b, zero) = (regs.alloc(), regs.alloc(), regs.alloc())
+        let (gradA, gradB, zero) = (regs.alloc(), regs.alloc(), regs.alloc())
         result.add(Instr(kind: InstrScalar, res: zero))
-        result.add(Instr(kind: InstrSelect, args: @[instr.args[0], grad, zero], res: grad_a))
-        result.add(Instr(kind: InstrSelect, args: @[instr.args[0], zero, grad], res: grad_b))
-        grad_args = @[RegId(0), grad_a, grad_b]
-      of InstrToScalar, InstrToIndex: grad_args = @[RegId(0)]
+        result.add(Instr(kind: InstrSelect, args: @[instr.args[0], grad, zero], res: gradA))
+        result.add(Instr(kind: InstrSelect, args: @[instr.args[0], zero, grad], res: gradB))
+        gradArgs = @[RegId(0), gradA, gradB]
+      of InstrToScalar, InstrToIndex: gradArgs = @[RegId(0)]
       else: discard
     
-    if grad_args.len != instr.args.len:
+    if gradArgs.len != instr.args.len:
       raise GradientError(msg: "Unable to derive " & $instr.kind)
     
     for it, arg in instr.args:
-      if grad_args[it] != RegId(0):
-        if arg in grad_regs:
+      if gradArgs[it] != RegId(0):
+        if arg in gradRegs:
           let sum = regs.alloc()
-          result.add(Instr(kind: InstrAdd, args: @[grad_regs[arg], grad_args[it]], res: sum))
-          grad_regs[arg] = sum
+          result.add(Instr(kind: InstrAdd, args: @[gradRegs[arg], gradArgs[it]], res: sum))
+          gradRegs[arg] = sum
         else:
-          grad_regs[arg] = grad_args[it]
+          gradRegs[arg] = gradArgs[it]
 
-proc derive*(kernel: Kernel, grad_tensors: Table[TensorId, TensorId]): seq[Kernel] =
-  let base_kernel = kernel.clone()
-  var grad_regs = init_table[RegId, RegId]()
+proc derive*(kernel: Kernel, gradTensors: Table[TensorId, TensorId]): seq[Kernel] =
+  let baseKernel = kernel.clone()
+  var gradRegs = initTable[RegId, RegId]()
   
-  block derive_write:
-    let write_grad = base_kernel.regs.alloc()
-    base_kernel.reads.add(TensorOp(
-      is_raw: kernel.write.is_raw,
-      data: write_grad,
+  block deriveWrite:
+    let writeGrad = baseKernel.regs.alloc()
+    baseKernel.reads.add(TensorOp(
+      isRaw: kernel.write.isRaw,
+      data: writeGrad,
       dims: kernel.write.dims,
-      tensor: grad_tensors[kernel.write.tensor]
+      tensor: gradTensors[kernel.write.tensor]
     ))
-    grad_regs[kernel.write.data] = write_grad
+    gradRegs[kernel.write.data] = writeGrad
   
-  block derive_expr:
-    base_kernel.expr.instrs &= kernel.expr.instrs.derive(
-      base_kernel.regs, grad_regs
+  block deriveExpr:
+    baseKernel.expr.instrs &= kernel.expr.instrs.derive(
+      baseKernel.regs, gradRegs
     )
   
   for read in kernel.reads:
-    let grad_kernel = base_kernel.clone()
-    if read.data in grad_regs:
-      grad_kernel.expr.res = grad_regs[read.data]
-      grad_kernel.write = TensorOp(
-        tensor: grad_tensors[read.tensor],
-        is_raw: read.is_raw,
+    let gradKernel = baseKernel.clone()
+    if read.data in gradRegs:
+      gradKernel.expr.res = gradRegs[read.data]
+      gradKernel.write = TensorOp(
+        tensor: gradTensors[read.tensor],
+        isRaw: read.isRaw,
         dims: read.dims,
-        data: grad_regs[read.data]
+        data: gradRegs[read.data]
       )
-      grad_kernel.dead_code_elim()
-      result.add(grad_kernel)
+      gradKernel.deadCodeElim()
+      result.add(gradKernel)
 
-proc copy_shape(target: Target, dest, src: TensorId) =
+proc copyShape(target: Target, dest, src: TensorId) =
   target.shapes.add(ShapeConstraint(kind: ShapeCopy, dest: dest, src: src))
 
 proc generate*(program: Program) =
-  program.assert_pass("generate",
+  program.assertPass("generate",
     produces={StageGenerated},
     preserves={StageShapes, StageFolded, StageTensors}
   )
@@ -492,76 +492,76 @@ proc generate*(program: Program) =
       case kernel.generator.kind:
         of GenBackwards:
           var
-            grad_tensors = init_table[TensorId, TensorId]()
-            grad_kernels: seq[Kernel] = @[]
+            gradTensors = initTable[TensorId, TensorId]()
+            gradKernels: seq[Kernel] = @[]
           
           block:
             let
               loss = kernel.generator.tensor
-              grad_loss = program.tensors.alloc(TensorDef(
+              gradLoss = program.tensors.alloc(TensorDef(
                 kind: TensorResult
               ))
-            grad_kernels.add(Kernel(
+            gradKernels.add(Kernel(
               regs: @[
                 Register(typ: Type(kind: TypeScalar, count: 1)),
                 Register(typ: Type(kind: TypeIndex, count: 1)),
                 Register(typ: Type(kind: TypeIndex, count: 1))
               ],
               loops: @[Loop(iter: RegId(2),
-                has_bounds: true,
+                hasBounds: true,
                 stop: LinearIndex(
                   setup: @[Instr(kind: InstrLen, tensor: loss, res: RegId(3))],
-                  factors: to_table({RegId(3): 1})
+                  factors: toTable({RegId(3): 1})
                 ),
                 step: 1
               )],
               expr: Expr(
-                instrs: @[Instr(kind: InstrScalar, scalar_lit: 1, res: RegId(1))],
+                instrs: @[Instr(kind: InstrScalar, scalarLit: 1, res: RegId(1))],
                 res: RegId(1)
               ),
               write: TensorOp(
-                is_raw: true,
-                tensor: grad_loss,
-                dims: @[init_linear_index(RegId(2))],
+                isRaw: true,
+                tensor: gradLoss,
+                dims: @[initLinearIndex(RegId(2))],
                 data: RegId(1)
               )
             ))
-            target.copy_shape(grad_loss, loss)
-            grad_tensors[loss] = grad_loss
+            target.copyShape(gradLoss, loss)
+            gradTensors[loss] = gradLoss
           
           for it2 in (it + 1)..<target.kernels.len:
             let kernel = target.kernels[it2]
             if kernel.generator.kind == GenGradient:
-              grad_tensors[kernel.generator.tensor] = kernel.write.tensor
-              target.copy_shape(kernel.write.tensor, kernel.generator.tensor)
+              gradTensors[kernel.generator.tensor] = kernel.write.tensor
+              target.copyShape(kernel.write.tensor, kernel.generator.tensor)
           
           for it2 in countdown(it - 1, 0):
             let kernel = target.kernels[it2]
             for read in kernel.reads:
-              if read.tensor notin grad_tensors:
-                let grad_tensor = program.tensors.alloc(TensorDef(
+              if read.tensor notin gradTensors:
+                let gradTensor = program.tensors.alloc(TensorDef(
                   kind: TensorResult
                 ))
-                target.copy_shape(grad_tensor, read.tensor)
-                grad_tensors[read.tensor] = grad_tensor
+                target.copyShape(gradTensor, read.tensor)
+                gradTensors[read.tensor] = gradTensor
             
-            if kernel.grad.is_custom:
+            if kernel.grad.isCustom:
               var subs = kernel.grad.subs
-              for initial_tensor, grad in kernel.grad.tensors:
-                var tensor = initial_tensor
+              for initialTensor, grad in kernel.grad.tensors:
+                var tensor = initialTensor
                 if tensor in kernel.grad.subs:
                   tensor = kernel.grad.subs[tensor]
-                subs[grad] = grad_tensors[tensor]
+                subs[grad] = gradTensors[tensor]
               for it in countdown(kernel.grad.kernels.len - 1, 0):
-                var grad_kernel = kernel.grad.kernels[it].clone()
-                grad_kernel.substitute(subs)
-                grad_kernels.add(grad_kernel)
+                var gradKernel = kernel.grad.kernels[it].clone()
+                gradKernel.substitute(subs)
+                gradKernels.add(gradKernel)
             else:
-              grad_kernels.add(kernel.derive(grad_tensors))
+              gradKernels.add(kernel.derive(gradTensors))
           
           target.kernels.delete(it)
-          target.kernels.insert(grad_kernels, it)
-          it += grad_kernels.len
+          target.kernels.insert(gradKernels, it)
+          it += gradKernels.len
         of GenGradient:
           target.kernels.delete(it)
         of GenReshape:
@@ -572,27 +572,27 @@ proc generate*(program: Program) =
               Register(typ: Type(kind: TypeIndex, count: 1))
             ],
             loops: @[Loop(iter: RegId(2),
-              has_bounds: true,
+              hasBounds: true,
               stop: LinearIndex(
                 setup: @[Instr(kind: InstrLen,
                   tensor: kernel.generator.tensor, res: RegId(3)
                 )],
-                factors: to_table({RegId(3): 1})
+                factors: toTable({RegId(3): 1})
               ),
               step: 1
             )],
             reads: @[TensorOp(
               tensor: kernel.generator.tensor,
-              dims: @[init_linear_index(RegId(2))],
+              dims: @[initLinearIndex(RegId(2))],
               data: RegId(1),
-              is_raw: true
+              isRaw: true
             )],
             expr: Expr(res: RegId(1)),
             write: TensorOp(
               tensor: kernel.write.tensor,
-              dims: @[init_linear_index(RegId(2))],
+              dims: @[initLinearIndex(RegId(2))],
               data: RegId(1),
-              is_raw: true
+              isRaw: true
             )
           )
           var
@@ -605,94 +605,94 @@ proc generate*(program: Program) =
               prod *= size
           for dim, size in kernel.generator.reshape:
             if size >= 0:
-              shape.dims.add(init_linear_index(size))
+              shape.dims.add(initLinearIndex(size))
             else:
               shape.dims.add(LinearIndex(
                 setup: @[
                   Instr(kind: InstrLen, tensor: kernel.generator.tensor, res: RegId(1)),
-                  Instr(kind: InstrIndex, index_lit: prod, res: RegId(2)),
+                  Instr(kind: InstrIndex, indexLit: prod, res: RegId(2)),
                   Instr(kind: InstrIndexDiv, args: @[RegId(1), RegId(2)], res: RegId(3))
                 ],
-                factors: to_table({RegId(3): 1})
+                factors: toTable({RegId(3): 1})
               ))
           target.shapes.add(shape)
           it += 1
         of GenNone:
           it += 1
 
-proc reorder_loops*(kernel: Kernel) =
-  var loop_iters = new_seq[LoopId](kernel.regs.len)
+proc reorderLoops*(kernel: Kernel) =
+  var loopIters = newSeq[LoopId](kernel.regs.len)
   for it, loop in kernel.loops:
-    loop_iters[loop.iter] = LoopId(it + 1)
+    loopIters[loop.iter] = LoopId(it + 1)
   
-  var graph = new_seq[array[TensorOpKind, seq[LoopId]]](kernel.loops.len)
-  for kind, op in kernel.tensor_ops:
+  var graph = newSeq[array[TensorOpKind, seq[LoopId]]](kernel.loops.len)
+  for kind, op in kernel.tensorOps:
     for it in 1..<op.dims.len:
-      for reg_a, factor_a in op.dims[it - 1].factors:
-        for reg_b, factor_b in op.dims[it].factors:
-          if loop_iters[reg_a] != LoopId(0) and
-             loop_iters[reg_b] != LoopId(0):
-            graph[int(loop_iters[reg_a]) - 1][kind].add(loop_iters[reg_b])
+      for regA, factorA in op.dims[it - 1].factors:
+        for regB, factorB in op.dims[it].factors:
+          if loopIters[regA] != LoopId(0) and
+             loopIters[regB] != LoopId(0):
+            graph[int(loopIters[regA]) - 1][kind].add(loopIters[regB])
   
   const SCORE_VALS = [OpRead: 10, OpWrite: 1]
-  var scores = new_seq[int](kernel.loops.len)
+  var scores = newSeq[int](kernel.loops.len)
   for it, edges in graph:
-    for kind, kind_edges in edges:
-      for target in kind_edges:
+    for kind, kindEdges in edges:
+      for target in kindEdges:
         scores[target] += SCORE_VALS[kind]
   
   var
-    closed = new_seq[bool](kernel.loops.len)
-    order = new_seq[LoopId]()
+    closed = newSeq[bool](kernel.loops.len)
+    order = newSeq[LoopId]()
   for it in 0..<kernel.loops.len:
     var
-      min_score = 0
-      min_loop = LoopId(0)
+      minScore = 0
+      minLoop = LoopId(0)
     for it, score in scores:
       if not closed[it]:
-        if score < min_score or min_loop == LoopId(0):
-          min_loop = LoopId(it + 1)
-          min_score = score
+        if score < minScore or minLoop == LoopId(0):
+          minLoop = LoopId(it + 1)
+          minScore = score
     
-    assert min_loop != LoopId(0)
-    closed[min_loop] = true
-    order.add(min_loop)
+    assert minLoop != LoopId(0)
+    closed[minLoop] = true
+    order.add(minLoop)
     
-    for kind, edges in graph[min_loop]:
+    for kind, edges in graph[minLoop]:
       for target in edges:
         scores[target] -= SCORE_VALS[kind]
   
-  var new_loops = new_seq[Loop](order.len)
-  for it, loop_id in order:
-    new_loops[it] = kernel.loops[loop_id]
-  kernel.loops = new_loops
+  var newLoops = newSeq[Loop](order.len)
+  for it, loopId in order:
+    newLoops[it] = kernel.loops[loopId]
+  kernel.loops = newLoops
 
-proc reorder_loops*(program: Program) =
-  program.assert_pass("reorder_loops",
+proc reorderLoops*(program: Program) =
+  program.assertPass("reorderLoops",
     preserves=ALL_STAGES
   )
   
   for name, target in program.targets:
     for kernel in target.kernels:
-      kernel.reorder_loops()
+      kernel.reorderLoops()
 
 proc unfold(linear: LinearIndex, regs: var seq[Register]): Expr =
   result.instrs = linear.setup
   
-  var terms = new_seq[RegId]()
+  var terms = newSeq[RegId]()
   for reg, factor in linear.factors:
     if factor != 0:
       if factor == 1:
         terms.add(reg)
       else:
-        let (product, factor_reg) = (regs.alloc(), regs.alloc())
-        result.instrs.add(Instr(kind: InstrIndex, index_lit: factor, res: factor_reg))
-        result.instrs.add(Instr(kind: InstrMul, args: @[reg, factor_reg], res: product))
+        let (product, factorReg) = (regs.alloc(), regs.alloc())
+        result.instrs.add(Instr(kind: InstrIndex, indexLit: factor, res: factorReg))
+        result.instrs.add(Instr(kind: InstrMul, args: @[reg, factorReg], res: product))
         terms.add(product)
   
   if linear.constant != 0:
     let reg = regs.alloc()
-    result.instrs.add(Instr(kind: InstrIndex, index_lit: linear.constant, res: reg))
+    result.instrs.add(Instr(kind: InstrIndex, indexLit: linear.constant, res: reg))
     terms.add(reg)
   
   if terms.len > 0:
@@ -707,25 +707,25 @@ proc unfold(linear: LinearIndex, regs: var seq[Register]): Expr =
     result.instrs.add(Instr(kind: InstrIndex, res: zero))
     result.res = zero
 
-proc expand_tensor_index(dims: seq[LinearIndex],
+proc expandTensorIndex(dims: seq[LinearIndex],
                          tensor: TensorId,
                          regs: var seq[Register],
                          shape: openArray[int] = []): Expr =
   var
     stride = RegId(0)
-    terms = new_seq[RegId]()
+    terms = newSeq[RegId]()
   for it in countdown(dims.len - 1, 0):
     let
       dim = dims[it]
-      dim_expr = dim.unfold(regs)
-    result.instrs.add(dim_expr.instrs)
+      dimExpr = dim.unfold(regs)
+    result.instrs.add(dimExpr.instrs)
     
     if stride == RegId(0):
-      terms.add(dim_expr.res)
+      terms.add(dimExpr.res)
     else:
       let product = regs.alloc()
       result.instrs.add(Instr(kind: InstrMul,
-        args: @[dim_expr.res, stride],
+        args: @[dimExpr.res, stride],
         res: product
       ))
       terms.add(product)
@@ -734,7 +734,7 @@ proc expand_tensor_index(dims: seq[LinearIndex],
       let size = regs.alloc()
       if it < shape.len and shape[it] >= 0:
         result.instrs.add(Instr(kind: InstrIndex,
-          index_lit: shape[it], res: size
+          indexLit: shape[it], res: size
         ))
       else:
         result.instrs.add(Instr(kind: InstrShape,
@@ -743,12 +743,12 @@ proc expand_tensor_index(dims: seq[LinearIndex],
       if stride == RegId(0):
         stride = size
       else:
-        let new_stride = regs.alloc()
+        let newStride = regs.alloc()
         result.instrs.add(Instr(kind: InstrMul,
           args: @[size, stride],
-          res: new_stride
+          res: newStride
         ))
-        stride = new_stride
+        stride = newStride
   
   if terms.len == 0:
     let zero = regs.alloc()
@@ -757,88 +757,88 @@ proc expand_tensor_index(dims: seq[LinearIndex],
   else:
     var sum = terms[0]
     for it in 1..<terms.len:
-      let new_sum = regs.alloc()
+      let newSum = regs.alloc()
       result.instrs.add(Instr(kind: InstrAdd,
         args: @[sum, terms[it]],
-        res: new_sum
+        res: newSum
       ))
-      sum = new_sum
+      sum = newSum
     result.res = sum
 
-proc inline_tensor_ops(kernel: Kernel, has_written: var seq[bool]) =
+proc inlineTensorOps(kernel: Kernel, hasWritten: var seq[bool]) =
   var instrs = [
-    OpRead: new_seq[Instr](),
-    OpWrite: new_seq[Instr]()
+    OpRead: newSeq[Instr](),
+    OpWrite: newSeq[Instr]()
   ]
   
-  for kind, tensor_op in kernel.tensor_ops:
-    var args = new_seq[RegId]()
-    if tensor_op.cache.exists:
-      args.add(tensor_op.cache.reg)
+  for kind, tensorOp in kernel.tensorOps:
+    var args = newSeq[RegId]()
+    if tensorOp.cache.exists:
+      args.add(tensorOp.cache.reg)
     
-    if tensor_op.is_raw:
-      let dim = tensor_op.dims[0].unfold(kernel.regs)
+    if tensorOp.isRaw:
+      let dim = tensorOp.dims[0].unfold(kernel.regs)
       instrs[kind].add(dim.instrs)
       args.add(dim.res)
     else:
       let index =
-        if tensor_op.cache.exists:
+        if tensorOp.cache.exists:
           var
             dims: seq[LinearIndex] = @[]
-            cache_shape: seq[int] = @[]
-          for it, dim in tensor_op.dims:
-            let cache_dim = tensor_op.cache.dims[it]
-            dims.add(dim - cache_dim.offset - init_linear_index(cache_dim.interval.min))
-            cache_shape.add(cache_dim.interval.max - cache_dim.interval.min + 1)
-          expand_tensor_index(dims, tensor_op.tensor, kernel.regs, cache_shape)
+            cacheShape: seq[int] = @[]
+          for it, dim in tensorOp.dims:
+            let cacheDim = tensorOp.cache.dims[it]
+            dims.add(dim - cacheDim.offset - initLinearIndex(cacheDim.interval.min))
+            cacheShape.add(cacheDim.interval.max - cacheDim.interval.min + 1)
+          expandTensorIndex(dims, tensorOp.tensor, kernel.regs, cacheShape)
         else:
-          expand_tensor_index(tensor_op.dims, tensor_op.tensor, kernel.regs)
+          expandTensorIndex(tensorOp.dims, tensorOp.tensor, kernel.regs)
       
       instrs[kind].add(index.instrs)
       args.add(index.res)
     
     var res = RegId(0)
     case kind:
-      of OpRead: res = tensor_op.data
-      of OpWrite: args.add(tensor_op.data)
+      of OpRead: res = tensorOp.data
+      of OpWrite: args.add(tensorOp.data)
     
-    let instr_kind = case kind:
+    let instrKind = case kind:
       of OpRead:
-        if tensor_op.cache.exists:
+        if tensorOp.cache.exists:
           InstrArrayRead
         else:
           InstrRead
       of OpWrite:
-        var can_overwrite = not has_written[tensor_op.tensor]
+        var canOverwrite = not hasWritten[tensorOp.tensor]
         for loop in kernel.loops:
           if loop.mode < LoopIndependent:
-            can_overwrite = false
+            canOverwrite = false
             break
-        if can_overwrite:
+        if canOverwrite:
           InstrOverwrite
         else:
           InstrWrite
     
     let tensor =
-      if instr_kind == InstrArrayRead:
+      if instrKind == InstrArrayRead:
         TensorId(0)
       else:
-        tensor_op.tensor
+        tensorOp.tensor
     
-    instrs[kind].add(Instr(kind: instr_kind,
+    instrs[kind].add(Instr(kind: instrKind,
       tensor: tensor,
       args: args,
       res: res
     ))
   
-  has_written[kernel.write.tensor] = true
+  hasWritten[kernel.write.tensor] = true
   kernel.expr.instrs = instrs[OpRead] & kernel.expr.instrs & instrs[OpWrite]
   kernel.expr.res = RegId(0)
-  kernel.reads = new_seq[TensorOp]()
+  kernel.reads = newSeq[TensorOp]()
   kernel.write = TensorOp()
 
-proc inline_tensor_ops*(program: Program) =
-  program.assert_pass("inline_tensor_ops",
+proc inlineTensorOps*(program: Program) =
+  program.assertPass("inlineTensorOps",
     requires={StageFolded, StageCacheSizes},
     produces={StageTensorInstrs},
     preserves={
@@ -848,51 +848,51 @@ proc inline_tensor_ops*(program: Program) =
     }
   )
 
-  var has_written = new_seq[bool](program.tensors.len)
+  var hasWritten = newSeq[bool](program.tensors.len)
   for it, tensor in program.tensors:
     if tensor.kind != TensorResult:
-      has_written[it] = true
+      hasWritten[it] = true
   for name, target in program.targets.mpairs:
     for kernel in target.kernels:
-      kernel.inline_tensor_ops(has_written)
+      kernel.inlineTensorOps(hasWritten)
 
-proc collect_tensors(instrs: seq[Instr], tensors: var HashSet[TensorId]) =
+proc collectTensors(instrs: seq[Instr], tensors: var HashSet[TensorId]) =
   for instr in instrs:
     if instr.tensor != TensorId(0):
       tensors.incl(instr.tensor)
-    instr.body.collect_tensors(tensors)
+    instr.body.collectTensors(tensors)
 
-proc collect_tensors(instrs: seq[Instr]): HashSet[TensorId] =
-  instrs.collect_tensors(result)
+proc collectTensors(instrs: seq[Instr]): HashSet[TensorId] =
+  instrs.collectTensors(result)
 
-proc collect_tensors(kernel: Kernel, tensors: var HashSet[TensorId]) =
-  for kind, op in kernel.tensor_ops:
+proc collectTensors(kernel: Kernel, tensors: var HashSet[TensorId]) =
+  for kind, op in kernel.tensorOps:
     tensors.incl(op.tensor)
   for loop in kernel.loops:
-    loop.start.setup.collect_tensors(tensors)
-    loop.stop.setup.collect_tensors(tensors)
-  kernel.expr.instrs.collect_tensors(tensors)
+    loop.start.setup.collectTensors(tensors)
+    loop.stop.setup.collectTensors(tensors)
+  kernel.expr.instrs.collectTensors(tensors)
 
-proc collect_tensors*(program: Program) =
-  program.assert_pass("collect_tensors",
+proc collectTensors*(program: Program) =
+  program.assertPass("collectTensors",
     requires={},
     produces={StageCollected},
     preserves=ALL_STAGES
   )
   
   for name, target in program.targets.mpairs:
-    target.tensors = init_hash_set[TensorId]()
+    target.tensors = initHashSet[TensorId]()
     for kernel in target.kernels:
-      kernel.collect_tensors(target.tensors)
+      kernel.collectTensors(target.tensors)
 
-proc unfold_inplace(index: var LinearIndex, regs: var seq[Register]) =
+proc unfoldInplace(index: var LinearIndex, regs: var seq[Register]) =
   let expr = index.unfold(regs)
   index.setup = expr.instrs
-  index.factors = to_table({expr.res: 1})
+  index.factors = toTable({expr.res: 1})
   index.constant = 0
 
-proc unfold_loop_bounds*(program: Program) =
-  program.assert_pass("unfold_loop_bounds",
+proc unfoldLoopBounds*(program: Program) =
+  program.assertPass("unfoldLoopBounds",
     requires={StageFolded},
     preserves={
       StageTensors, StageGenerated, StageBounds,
@@ -903,29 +903,29 @@ proc unfold_loop_bounds*(program: Program) =
   for name, target in program.targets:
     for kernel in target.kernels:
       for loop in kernel.loops.mitems:
-        loop.start.unfold_inplace(kernel.regs)
-        loop.stop.unfold_inplace(kernel.regs)
+        loop.start.unfoldInplace(kernel.regs)
+        loop.stop.unfoldInplace(kernel.regs)
 
-proc peek_key[K, V](tab: Table[K, V]): K =
+proc peekKey[K, V](tab: Table[K, V]): K =
   for key, value in tab:
     return key
 
-proc peek_value[K, V](tab: Table[K, V]): V =
+proc peekValue[K, V](tab: Table[K, V]): V =
   for key, value in tab:
     return value
 
-proc only_register*(linear: LinearIndex): RegId =
+proc onlyRegister*(linear: LinearIndex): RegId =
   if linear.constant == 0 and
      linear.factors.len == 1 and
-     linear.factors.peek_value() == 1:
-    result = linear.factors.peek_key()
+     linear.factors.peekValue() == 1:
+    result = linear.factors.peekKey()
 
-proc use_bounds(loop: var Loop, op: TensorOp, dim: int, regs: var seq[Register]) =
-  loop.has_bounds = true
-  loop.start = init_linear_index(0)
+proc useBounds(loop: var Loop, op: TensorOp, dim: int, regs: var seq[Register]) =
+  loop.hasBounds = true
+  loop.start = initLinearIndex(0)
   let size = regs.alloc()
-  loop.stop = init_linear_index(size)
-  if op.is_raw:
+  loop.stop = initLinearIndex(size)
+  if op.isRaw:
     loop.stop.setup = @[Instr(kind: InstrLen,
       tensor: op.tensor, res: size
     )]
@@ -935,8 +935,8 @@ proc use_bounds(loop: var Loop, op: TensorOp, dim: int, regs: var seq[Register])
     )]
   loop.step = 1
 
-proc infer_loop_bounds*(program: Program) =
-  program.assert_pass("infer_loop_bounds",
+proc inferLoopBounds*(program: Program) =
+  program.assertPass("inferLoopBounds",
     requires={StageFolded},
     produces={StageBounds},
     preserves={
@@ -947,39 +947,39 @@ proc infer_loop_bounds*(program: Program) =
   
   for name, target in program.targets:
     for kernel in target.kernels:
-      var iters = init_table[RegId, LoopId]()
+      var iters = initTable[RegId, LoopId]()
       for it, loop in kernel.loops:
-        if not loop.has_bounds:
+        if not loop.hasBounds:
           iters[loop.iter] = LoopId(it + 1)
-      for kind, op in kernel.tensor_ops:
+      for kind, op in kernel.tensorOps:
         for it, dim in op.dims:
-          if dim.only_register != RegId(0) and
-             dim.only_register in iters:
-            let loop_id = iters[dim.only_register]
-            if not kernel.loops[loop_id].has_bounds:
-              kernel.loops[loop_id].use_bounds(op, it, kernel.regs)
+          if dim.onlyRegister != RegId(0) and
+             dim.onlyRegister in iters:
+            let loopId = iters[dim.onlyRegister]
+            if not kernel.loops[loopId].hasBounds:
+              kernel.loops[loopId].useBounds(op, it, kernel.regs)
 
-proc simplify_max_index(indices: var seq[LinearIndex]) =
+proc simplifyMaxIndex(indices: var seq[LinearIndex]) =
   var
-    max_constants = init_table[Table[RegId, int], int]()
-    complex_indices = new_seq[LinearIndex]()
+    maxConstants = initTable[Table[RegId, int], int]()
+    complexIndices = newSeq[LinearIndex]()
   for it, index in indices:
     if index.setup.len == 0:
-      if index.factors notin max_constants:
-        max_constants[index.factors] = index.constant
+      if index.factors notin maxConstants:
+        maxConstants[index.factors] = index.constant
       else:
-        max_constants[index.factors] = max(max_constants[index.factors], index.constant)
+        maxConstants[index.factors] = max(maxConstants[index.factors], index.constant)
     else:
-      complex_indices.add(index)
+      complexIndices.add(index)
   
-  indices = complex_indices
-  for factors, constant in max_constants:
+  indices = complexIndices
+  for factors, constant in maxConstants:
     indices.add(LinearIndex(
       factors: factors, constant: constant
     ))
 
-proc infer_shape_constraints(kernel: Kernel): ShapeConstraint =
-  if kernel.write.is_raw:
+proc inferShapeConstraints(kernel: Kernel): ShapeConstraint =
+  if kernel.write.isRaw:
     if kernel.reads.len == 1:
       result = ShapeConstraint(kind: ShapeCopy,
         src: kernel.reads[0].tensor,
@@ -988,9 +988,9 @@ proc infer_shape_constraints(kernel: Kernel): ShapeConstraint =
   else:
     result = ShapeConstraint(kind: ShapeLinear)
     for op in kernel.reads:
-      if not op.is_raw:
+      if not op.isRaw:
         if op.tensor notin result.reads:
-          result.reads[op.tensor] = new_seq[seq[LinearIndex]](op.dims.len)
+          result.reads[op.tensor] = newSeq[seq[LinearIndex]](op.dims.len)
         for it, dim in op.dims:
           result.reads[op.tensor][it].add(dim)
     
@@ -1000,10 +1000,10 @@ proc infer_shape_constraints(kernel: Kernel): ShapeConstraint =
     
     for tensor, dims in result.reads.mpairs:
       for dim in dims.mitems:
-        dim.simplify_max_index()
+        dim.simplifyMaxIndex()
 
-proc infer_shape_constraints*(program: Program) =
-  program.assert_pass("infer_shape_constraints",
+proc inferShapeConstraints*(program: Program) =
+  program.assertPass("inferShapeConstraints",
     requires={StageFolded, StageTensors},
     produces={StageShapes},
     preserves={
@@ -1013,14 +1013,14 @@ proc infer_shape_constraints*(program: Program) =
   
   for name, target in program.targets.mpairs:
     for tensor in program.caches:
-      let tensor_def = program.tensors[tensor]
+      let tensorDef = program.tensors[tensor]
       target.shapes.add(ShapeConstraint(kind: ShapeCopy,
-        src: tensor_def.cache, dest: tensor
+        src: tensorDef.cache, dest: tensor
       ))
     
     for it, kernel in target.kernels:
       if kernel.generator.kind == GenNone:
-        target.shapes.add(kernel.infer_shape_constraints())
+        target.shapes.add(kernel.inferShapeConstraints())
 
 iterator deps(shape: ShapeConstraint): TensorId =
   case shape.kind:
@@ -1035,7 +1035,7 @@ iterator deps(shape: ShapeConstraint): TensorId =
         yield tensor
     of ShapeCopy: yield shape.src
 
-proc flatten_constraints(tensor: TensorId,
+proc flattenConstraints(tensor: TensorId,
                          tensors: Table[TensorId, ShapeConstraint],
                          closed: var seq[bool],
                          order: var seq[ShapeConstraint],
@@ -1047,11 +1047,11 @@ proc flatten_constraints(tensor: TensorId,
       raise ShapeError(msg: $tensor & " (" & program.tensors[tensor].name & ") requires shape")
     let constr = tensors[tensor]
     for dep in constr.deps:
-      dep.flatten_constraints(tensors, closed, order, program)
+      dep.flattenConstraints(tensors, closed, order, program)
     order.add(constr)
 
-proc sort_shape_constraints*(program: Program) =
-  program.assert_pass("sort_shape_constraints",
+proc sortShapeConstraints*(program: Program) =
+  program.assertPass("sortShapeConstraints",
     requires={StageShapes, StageCollected},
     produces={StageSortedShapes},
     preserves=ALL_STAGES
@@ -1059,8 +1059,8 @@ proc sort_shape_constraints*(program: Program) =
   
   for name, target in program.targets.mpairs:
     var
-      tensors = init_table[TensorId, ShapeConstraint]()
-      closed = new_seq[bool](program.tensors.len)
+      tensors = initTable[TensorId, ShapeConstraint]()
+      closed = newSeq[bool](program.tensors.len)
     
     for constr in target.shapes:
       if constr.dest notin tensors:
@@ -1068,9 +1068,9 @@ proc sort_shape_constraints*(program: Program) =
       else:
         discard # TODO: Unify current and new constraint
     
-    var order = new_seq[ShapeConstraint]()
+    var order = newSeq[ShapeConstraint]()
     for tensor in target.tensors:
-      tensor.flatten_constraints(tensors, closed, order, program)
+      tensor.flattenConstraints(tensors, closed, order, program)
     
     target.shapes = order
 
@@ -1094,17 +1094,17 @@ proc `$`[T](matrix: Matrix[T]): string =
       result &= $matrix[y, x]
   result = "[" & result & "]"
 
-proc swap_rows[T](matrix: var Matrix[T], a, b: int) =
+proc swapRows[T](matrix: var Matrix[T], a, b: int) =
   for x in 0..<matrix.width:
     swap(matrix[a, x], matrix[b, x])
 {.pop.}
 
-proc init_matrix[T](h, w: int): Matrix[T] =
-  result = Matrix[T](width: w, data: new_seq[T](w * h))
+proc initMatrix[T](h, w: int): Matrix[T] =
+  result = Matrix[T](width: w, data: newSeq[T](w * h))
 
 type Fraction = Rational[int]
 proc solve(equations: seq[LinearIndex]): Table[RegId, Fraction] =
-  var indices = init_table[RegId, int]()
+  var indices = initTable[RegId, int]()
   for equation in equations:
     for reg, factor in equation.factors:
       if reg notin indices:
@@ -1114,32 +1114,32 @@ proc solve(equations: seq[LinearIndex]): Table[RegId, Fraction] =
     return
   
   if equations.len < indices.len:
-    raise new_exception(ValueError, "Underconstrained linear system")
+    raise newException(ValueError, "Underconstrained linear system")
   
   var
-    matrix = init_matrix[int](indices.len, indices.len + 1)
-    known = init_hash_set[seq[Fraction]]()
+    matrix = initMatrix[int](indices.len, indices.len + 1)
+    known = initHashSet[seq[Fraction]]()
     y = 0
   for equation in equations:
     if equation.factors.len == 0:
       if equation.constant != 0:
-        raise new_exception(ValueError, "No solution")
+        raise newException(ValueError, "No solution")
       continue
     
-    var row = new_seq[int](matrix.width)
+    var row = newSeq[int](matrix.width)
     for reg, factor in equation.factors:
       row[indices[reg]] = factor
     row[indices.len] = -equation.constant
     var
-      normalized = new_seq[Fraction](matrix.width)
-      first_value = 0
+      normalized = newSeq[Fraction](matrix.width)
+      firstValue = 0
     for x, value in row:
-      if first_value == 0:
-        first_value = value
-      if first_value == 0:
+      if firstValue == 0:
+        firstValue = value
+      if firstValue == 0:
         normalized[x] = 0//1
       else:
-        normalized[x] = value // first_value
+        normalized[x] = value // firstValue
     
     if normalized notin known:
       for x in 0..<matrix.width:
@@ -1150,15 +1150,15 @@ proc solve(equations: seq[LinearIndex]): Table[RegId, Fraction] =
         break
   
   if y < matrix.height:
-    raise new_exception(ValueError, "Underconstrained linear system")
+    raise newException(ValueError, "Underconstrained linear system")
   
   for pivot in 0..<matrix.height:
-    var max_row = pivot
+    var maxRow = pivot
     for y in (pivot + 1)..<matrix.height:
-      if abs(matrix[y, pivot]) > abs(matrix[max_row, pivot]):
-        max_row = y
-    if max_row != pivot:
-      matrix.swap_rows(max_row, pivot)
+      if abs(matrix[y, pivot]) > abs(matrix[maxRow, pivot]):
+        maxRow = y
+    if maxRow != pivot:
+      matrix.swapRows(maxRow, pivot)
     let target = matrix[pivot, pivot]
     for y in (pivot + 1)..<matrix.height:
       let cur = matrix[y, pivot]
@@ -1166,7 +1166,7 @@ proc solve(equations: seq[LinearIndex]): Table[RegId, Fraction] =
         for x in 0..<matrix.width:
           matrix[y, x] = matrix[y, x] * target - matrix[pivot, x] * cur
   
-  var solutions = new_seq[Fraction](indices.len)
+  var solutions = newSeq[Fraction](indices.len)
   for y in countdown(matrix.height - 1, 0):
     var sum = matrix[y, indices.len] // 1
     for x in (y + 1)..<indices.len:
@@ -1184,14 +1184,14 @@ proc eval*(instrs: seq[Instr],
            regs: var Table[RegId, int]): EvalResult =
   result = EvalSuccess
   for instr in instrs:
-    var can_eval = true
+    var canEval = true
     for arg in instr.args:
       if arg notin regs:
-        can_eval = false
+        canEval = false
         break
-    if can_eval and instr.tensor != TensorId(0):
-      can_eval = instr.tensor in shapes
-    if not can_eval:
+    if canEval and instr.tensor != TensorId(0):
+      canEval = instr.tensor in shapes
+    if not canEval:
       return EvalDynamicReg
     case instr.kind:
       of InstrShape:
@@ -1207,14 +1207,14 @@ proc eval*(instrs: seq[Instr],
           return EvalDynamicShape
         regs[instr.res] = size
       of InstrLen:
-        if shapes[instr.tensor].len == 0 or shapes[instr.tensor].any_it(it < 0):
+        if shapes[instr.tensor].len == 0 or shapes[instr.tensor].anyIt(it < 0):
           return EvalDynamicShape
         regs[instr.res] = shapes[instr.tensor].prod()
       of InstrShapeLen:
         regs[instr.res] = shapes[instr.tensor].len
         if regs[instr.res] < 0:
           return EvalDynamicShape
-      of InstrIndex: regs[instr.res] = instr.index_lit
+      of InstrIndex: regs[instr.res] = instr.indexLit
       of InstrAdd: regs[instr.res] = regs[instr.args[0]] + regs[instr.args[1]]
       of InstrSub: regs[instr.res] = regs[instr.args[0]] - regs[instr.args[1]]
       of InstrMul: regs[instr.res] = regs[instr.args[0]] * regs[instr.args[1]]
@@ -1227,34 +1227,34 @@ proc eval*(instrs: seq[Instr],
       of InstrNegate: regs[instr.res] = -regs[instr.args[0]]
       else: return EvalInvalidInstruction
 
-proc matches(static_shape, shape: seq[int]): bool =
-  if static_shape.len == 0:
+proc matches(staticShape, shape: seq[int]): bool =
+  if staticShape.len == 0:
     result = true
-  elif static_shape.len == shape.len:
-    for dim, size in static_shape:
+  elif staticShape.len == shape.len:
+    for dim, size in staticShape:
       if size >= 0:
-        if shape[dim] != static_shape[dim]:
+        if shape[dim] != staticShape[dim]:
           return false
     result = true
 
-proc infer_shapes*(program: Program,
+proc inferShapes*(program: Program,
                    target: string,
                    inputs: openArray[(TensorId, seq[int])]): Table[TensorId, seq[int]] =
-  result = init_table[TensorId, seq[int]]()
+  result = initTable[TensorId, seq[int]]()
   for (tensor, shape) in inputs:
     result[tensor] = shape
-    let static_shape = program.tensors[tensor].shape
-    if not static_shape.matches(shape):
-      raise ShapeError(msg: "Given shape for " & $tensor & " is " & $shape & ", but its static shape is " & $static_shape)
-  for tensor_id in program.params:
-    result[tensor_id] = program.tensors[tensor_id].shape
+    let staticShape = program.tensors[tensor].shape
+    if not staticShape.matches(shape):
+      raise ShapeError(msg: "Given shape for " & $tensor & " is " & $shape & ", but its static shape is " & $staticShape)
+  for tensorId in program.params:
+    result[tensorId] = program.tensors[tensorId].shape
   for shape in program.targets[target].shapes:
     case shape.kind:
       of ShapeNone: discard
       of ShapeDims:
-        var sizes = new_seq[int](shape.dims.len)
+        var sizes = newSeq[int](shape.dims.len)
         for dim, index in shape.dims:
-          var regs = init_table[RegId, int]()
+          var regs = initTable[RegId, int]()
           case index.setup.eval(result, regs):
             of EvalSuccess: discard
             of EvalDynamicShape: raise ShapeError(msg: "Not all shapes are known. Maybe you forgot to pass a required input tensor.")
@@ -1274,37 +1274,37 @@ proc infer_shapes*(program: Program,
             let index = indices[0]
             equations.add(index - (result[tensor][dim] - 1))
         
-        var max_values = init_table[RegId, int]()
-        for reg, max_value in solve(equations):
-          max_values[reg] = max_value.num div max_value.den
+        var maxValues = initTable[RegId, int]()
+        for reg, maxValue in solve(equations):
+          maxValues[reg] = maxValue.num div maxValue.den
         
-        result[shape.dest] = new_seq[int](shape.write.len)
+        result[shape.dest] = newSeq[int](shape.write.len)
         for dim, index in shape.write:
-          result[shape.dest][dim] = index.eval(max_values) + 1
+          result[shape.dest][dim] = index.eval(maxValues) + 1
 
-proc static_shape_table(tensors: seq[TensorDef]): Table[TensorId, seq[int]] =
+proc staticShapeTable(tensors: seq[TensorDef]): Table[TensorId, seq[int]] =
   for it, tensor in tensors:
     let id = TensorId(it + 1)
     if tensor.shape.len > 0:
       result[id] = tensor.shape
 
-proc infer_static_shapes*(program: Program) =
-  program.assert_pass("infer_static_shapes",
+proc inferStaticShapes*(program: Program) =
+  program.assertPass("inferStaticShapes",
     requires={StageSortedShapes},
     produces={StageStaticShapes},
     preserves=ALL_STAGES
   )
   
-  var shapes = program.tensors.static_shape_table()
+  var shapes = program.tensors.staticShapeTable()
   for name, target in program.targets:
     for shape in target.shapes:
       var dims: seq[int] = @[]
       case shape.kind:
         of ShapeNone: discard
         of ShapeDims:
-          dims = new_seq[int](shape.dims.len)
+          dims = newSeq[int](shape.dims.len)
           for dim, size in shape.dims:
-            var regs = init_table[RegId, int]()
+            var regs = initTable[RegId, int]()
             if size.setup.eval(shapes, regs) == EvalSuccess:
               dims[dim] = size.eval(regs)
             else:
@@ -1319,19 +1319,19 @@ proc infer_static_shapes*(program: Program) =
                 if size >= 0:
                   equations.add(index[0] - (size - 1))
           
-          var max_values = init_table[RegId, int]()
-          for reg, max_value in solve(equations):
-            max_values[reg] = max_value.num div max_value.den
+          var maxValues = initTable[RegId, int]()
+          for reg, maxValue in solve(equations):
+            maxValues[reg] = maxValue.num div maxValue.den
           
-          dims = new_seq[int](shape.write.len)
+          dims = newSeq[int](shape.write.len)
           for dim, size in shape.write:
-            var can_eval = true
+            var canEval = true
             for reg, factor in size.factors:
-              if reg notin max_values:
-                can_eval = false
+              if reg notin maxValues:
+                canEval = false
                 break
-            if can_eval:
-              dims[dim] = size.eval(max_values) + 1
+            if canEval:
+              dims[dim] = size.eval(maxValues) + 1
             else:
               dims[dim] = -1
         of ShapeCopy:
@@ -1340,7 +1340,7 @@ proc infer_static_shapes*(program: Program) =
       
       if dims.len > 0:
         if shape.dest in shapes:
-          do_assert shapes[shape.dest] == dims
+          doAssert shapes[shape.dest] == dims
         else:
           shapes[shape.dest] = dims
   
@@ -1351,15 +1351,15 @@ proc infer_static_shapes*(program: Program) =
         if id in shapes:
           tensor.shape = shapes[id]
       of TensorCache:
-        if id notin shapes or shapes[id].any_it(it < 0):
-          let kind = ($tensor.kind)[len("Tensor")..^1].to_lower_ascii()
+        if id notin shapes or shapes[id].anyIt(it < 0):
+          let kind = ($tensor.kind)[len("Tensor")..^1].toLowerAscii()
           raise ShapeError(msg: "Shape of " & kind & " \"" & tensor.name & "\" must be inferred at compile time")
         tensor.shape = shapes[id]
       else:
         if id in shapes:
           assert tensor.shape == shapes[id]
 
-proc inline_static_shapes(instrs: var seq[Instr], tensors: seq[TensorDef]) =
+proc inlineStaticShapes(instrs: var seq[Instr], tensors: seq[TensorDef]) =
   for instr in instrs.mitems:
     var size = -1
     if instr.tensor != TensorId(0) and
@@ -1375,10 +1375,10 @@ proc inline_static_shapes(instrs: var seq[Instr], tensors: seq[TensorDef]) =
         of InstrShapeLen: size = shape.len
         else: discard
     if size >= 0:
-      instr = Instr(kind: InstrIndex, index_lit: size, res: instr.res)
+      instr = Instr(kind: InstrIndex, indexLit: size, res: instr.res)
 
-proc inline_static_shapes*(program: Program) =
-  program.assert_pass("inline_static_shapes",
+proc inlineStaticShapes*(program: Program) =
+  program.assertPass("inlineStaticShapes",
     produces={},
     requires={StageStaticShapes, StageBounds, StageTensorInstrs},
     preserves={
@@ -1389,15 +1389,15 @@ proc inline_static_shapes*(program: Program) =
   
   for name, target in program.targets:
     for kernel in target.kernels:
-      kernel.setup.inline_static_shapes(program.tensors)
+      kernel.setup.inlineStaticShapes(program.tensors)
       for loop in kernel.loops.mitems:
-        loop.start.setup.inline_static_shapes(program.tensors)
-        loop.stop.setup.inline_static_shapes(program.tensors)
-        loop.cache.inline_static_shapes(program.tensors)
-      kernel.expr.instrs.inline_static_shapes(program.tensors)
+        loop.start.setup.inlineStaticShapes(program.tensors)
+        loop.stop.setup.inlineStaticShapes(program.tensors)
+        loop.cache.inlineStaticShapes(program.tensors)
+      kernel.expr.instrs.inlineStaticShapes(program.tensors)
 
-proc make_tensor_lookups*(program: Program) =
-  program.assert_pass("make_tensor_lookups",
+proc makeTensorLookups*(program: Program) =
+  program.assertPass("makeTensorLookups",
     produces={StageTensors},
     preserves=ALL_STAGES
   )
@@ -1410,17 +1410,17 @@ proc make_tensor_lookups*(program: Program) =
       of TensorCache: program.caches.add(id)
       else: discard
 
-proc identify_independent*(kernel: Kernel) =
-  var independent = init_hash_set[RegId]()
+proc identifyIndependent*(kernel: Kernel) =
+  var independent = initHashSet[RegId]()
   for dim in kernel.write.dims:
-    if dim.only_register != RegId(0):
-      independent.incl(dim.factors.peek_key())
+    if dim.onlyRegister != RegId(0):
+      independent.incl(dim.factors.peekKey())
   for loop in kernel.loops.mitems:
     if loop.iter in independent:
       loop.mode = LoopIndependent
 
-proc identify_independent*(program: Program) =
-  program.assert_pass("identify_independent",
+proc identifyIndependent*(program: Program) =
+  program.assertPass("identifyIndependent",
     produces={StageIndependent},
     requires={},
     preserves=ALL_STAGES
@@ -1428,10 +1428,10 @@ proc identify_independent*(program: Program) =
   
   for name, target in program.targets:
     for kernel in target.kernels:
-      kernel.identify_independent()
+      kernel.identifyIndependent()
 
-proc choose_parallel*(program: Program) =
-  program.assert_pass("choose_parallel",
+proc chooseParallel*(program: Program) =
+  program.assertPass("chooseParallel",
     requires={StageIndependent},
     produces={},
     preserves=ALL_STAGES
@@ -1444,10 +1444,10 @@ proc choose_parallel*(program: Program) =
   ]
   
   for name, target in program.targets:
-    if LOOP_COUNT[target.compile_target] > 0:
+    if LOOP_COUNT[target.compileTarget] > 0:
       for kernel in target.kernels:
         var
-          count = LOOP_COUNT[target.compile_target]
+          count = LOOP_COUNT[target.compileTarget]
           parallel: seq[Loop] = @[]
           it = 0
         while it < kernel.loops.len and count > 0:
@@ -1468,12 +1468,12 @@ type
     tensor: TensorId
     dim: int
 
-proc bounds_info(loop: Loop): BoundsInfo =
+proc boundsInfo(loop: Loop): BoundsInfo =
   if loop.start.factors.len == 0 and
      loop.start.constant == 0 and
-     loop.stop.only_register != RegId(0) and
+     loop.stop.onlyRegister != RegId(0) and
      loop.stop.setup.len > 0 and
-     loop.stop.only_register == loop.stop.setup[^1].res:
+     loop.stop.onlyRegister == loop.stop.setup[^1].res:
     result.tensor = loop.stop.setup[^1].tensor
     case loop.stop.setup[^1].kind:
       of InstrShape:
@@ -1490,7 +1490,7 @@ type
 proc `==`(a, b: TokenId): bool {.borrow.}
 proc `$`(token: TokenId): string =
   if token == TokenId(0):
-    result = "no_token"
+    result = "noToken"
   else:
     result = "token" & $(int(token) - 1)
 
@@ -1498,22 +1498,22 @@ proc alloc(tokens: var TokenId): TokenId =
   tokens = TokenId(int(tokens) + 1)
   result = tokens
 
-proc build_shape_tokens(program: Program): ShapeTokens =
-  program.assert_analysis("build_shape_tokens", requires={
+proc buildShapeTokens(program: Program): ShapeTokens =
+  program.assertAnalysis("buildShapeTokens", requires={
     StageSortedShapes, StageStaticShapes, StageFolded
   })
   
-  result = new_seq[seq[TokenId]](program.tensors.len)
+  result = newSeq[seq[TokenId]](program.tensors.len)
   var
     tokens = TokenId(0)
-    value_tokens = init_table[int, TokenId]()
+    valueTokens = initTable[int, TokenId]()
   for it, tensor in program.tensors:
-    result[it] = new_seq[TokenId](tensor.shape.len)
+    result[it] = newSeq[TokenId](tensor.shape.len)
     for dim, size in tensor.shape:
       if size != -1:
-        if size notin value_tokens:
-          value_tokens[size] = tokens.alloc()
-        result[it][dim] = value_tokens[size]
+        if size notin valueTokens:
+          valueTokens[size] = tokens.alloc()
+        result[it][dim] = valueTokens[size]
   
   for name, target in program.targets:
     for shape in target.shapes:
@@ -1521,12 +1521,12 @@ proc build_shape_tokens(program: Program): ShapeTokens =
         of ShapeNone: discard
         of ShapeDims:
           if result[shape.dest].len == 0:
-            result[shape.dest] = new_seq[TokenId](shape.dims.len)
+            result[shape.dest] = newSeq[TokenId](shape.dims.len)
           for dim, size in shape.dims:
             if result[shape.dest][dim] == TokenId(0):
-              if size.only_register != RegId(0) and
+              if size.onlyRegister != RegId(0) and
                  size.setup.len > 0 and
-                 size.setup[^1].res == size.only_register and
+                 size.setup[^1].res == size.onlyRegister and
                  size.setup[^1].kind == InstrShape:
                 let instr = size.setup[^1]
                 while result[instr.tensor].len <= instr.dim:
@@ -1535,26 +1535,26 @@ proc build_shape_tokens(program: Program): ShapeTokens =
               else:
                 result[shape.dest][dim] = tokens.alloc()
         of ShapeLinear:
-          var regs = init_table[RegId, TokenId]()
+          var regs = initTable[RegId, TokenId]()
           for tensor, dims in shape.reads:
             while result[tensor].len < dims.len:
               result[tensor].add(tokens.alloc())
             for dim, size in dims:
               assert size.len == 1
-              if size[0].only_register != RegId(0):
-                regs[size[0].only_register] = result[tensor][dim]
+              if size[0].onlyRegister != RegId(0):
+                regs[size[0].onlyRegister] = result[tensor][dim]
           if result[shape.dest].len == 0:
-            result[shape.dest] = new_seq[TokenId](shape.write.len)
+            result[shape.dest] = newSeq[TokenId](shape.write.len)
           for dim, size in shape.write:
             if result[shape.dest][dim] == TokenId(0):
-              if size.only_register in regs:
-                result[shape.dest][dim] = regs[size.only_register]
+              if size.onlyRegister in regs:
+                result[shape.dest][dim] = regs[size.onlyRegister]
               else:
                 result[shape.dest][dim] = tokens.alloc()
         of ShapeCopy:
           result[shape.dest] = result[shape.src]
 
-proc same_range(tokens: ShapeTokens, a, b: BoundsInfo): bool =
+proc sameRange(tokens: ShapeTokens, a, b: BoundsInfo): bool =
   if a.mode == b.mode:
     case a.mode:
       of BoundsNone: result = false
@@ -1563,36 +1563,36 @@ proc same_range(tokens: ShapeTokens, a, b: BoundsInfo): bool =
       of BoundsLen:
         result = tokens[a.tensor] == tokens[b.tensor]
 
-proc is_elementwise_map(kernel: Kernel): bool =
+proc isElementwiseMap(kernel: Kernel): bool =
   if kernel.loops.len == 1:
     let
       iter = kernel.loops[0].iter
-      info = kernel.loops[0].bounds_info
-    result = kernel.reads.len == 1 and kernel.reads[0].is_raw and
-             kernel.reads[0].dims[0].only_register == iter and
-             kernel.write.is_raw and
-             kernel.write.dims[0].only_register == iter and
+      info = kernel.loops[0].boundsInfo
+    result = kernel.reads.len == 1 and kernel.reads[0].isRaw and
+             kernel.reads[0].dims[0].onlyRegister == iter and
+             kernel.write.isRaw and
+             kernel.write.dims[0].onlyRegister == iter and
              info.mode == BoundsLen and
              (info.tensor == kernel.reads[0].tensor or
               info.tensor == kernel.write.tensor)
 
-proc nest_elementwise_map(kernel: Kernel, tensors: seq[TensorDef]) =
+proc nestElementwiseMap(kernel: Kernel, tensors: seq[TensorDef]) =
   kernel.loops = @[]
-  kernel.reads[0].is_raw = false
-  kernel.write.is_raw = false
+  kernel.reads[0].isRaw = false
+  kernel.write.isRaw = false
   
-  let tensor_id = kernel.reads[0].tensor
+  let tensorId = kernel.reads[0].tensor
   var iters: seq[LinearIndex] = @[]
-  for dim, size in tensors[tensor_id].shape:
+  for dim, size in tensors[tensorId].shape:
     let iter = kernel.regs.alloc()
-    iters.add(init_linear_index(iter))
-    kernel.loops.add(Loop(iter: iter, has_bounds: true))
-    kernel.loops[^1].use_bounds(kernel.reads[0], dim, kernel.regs)
+    iters.add(initLinearIndex(iter))
+    kernel.loops.add(Loop(iter: iter, hasBounds: true))
+    kernel.loops[^1].useBounds(kernel.reads[0], dim, kernel.regs)
   kernel.reads[0].dims = iters
   kernel.write.dims = iters
 
-proc fuse_loops*(program: Program) =
-  program.assert_pass("fuse_loops",
+proc fuseLoops*(program: Program) =
+  program.assertPass("fuseLoops",
     requires={StageBounds, StageIndependent, StageStaticShapes},
     produces={},
     preserves={
@@ -1602,45 +1602,45 @@ proc fuse_loops*(program: Program) =
     }
   )
   
-  let shape_tokens = program.build_shape_tokens()
+  let shapeTokens = program.buildShapeTokens()
   for name, target in program.targets:
-    for kernel_it in 1..<target.kernels.len:
+    for kernelIt in 1..<target.kernels.len:
       let
-        a = target.kernels[kernel_it - 1]
-        b = target.kernels[kernel_it]
+        a = target.kernels[kernelIt - 1]
+        b = target.kernels[kernelIt]
       
-      if b.is_elementwise_map() and
+      if b.isElementwiseMap() and
          a.write.tensor == b.reads[0].tensor and
          a.loops.len > 0 and
-         a.loops[0].bounds_info.mode == BoundsDim and
+         a.loops[0].boundsInfo.mode == BoundsDim and
          a.loops[0].mode >= LoopIndependent and
-         shape_tokens[b.reads[0].tensor] == shape_tokens[b.write.tensor]:
-        b.nest_elementwise_map(program.tensors)
+         shapeTokens[b.reads[0].tensor] == shapeTokens[b.write.tensor]:
+        b.nestElementwiseMap(program.tensors)
       
-      if not a.write.is_raw and
-         not b.reads.any_it(it.tensor == a.write.tensor and it.is_raw):
+      if not a.write.isRaw and
+         not b.reads.anyIt(it.tensor == a.write.tensor and it.isRaw):
         for it in 0..<min(a.loops.len, b.loops.len):
           let
-            a_loop = a.loops[it]
-            b_loop = b.loops[it]
-          if not shape_tokens.same_range(a_loop.bounds_info, b_loop.bounds_info):
+            aLoop = a.loops[it]
+            bLoop = b.loops[it]
+          if not shapeTokens.sameRange(aLoop.boundsInfo, bLoop.boundsInfo):
             break
           var dim = -1
-          for dim_it, index in a.write.dims:
-            if index.only_register == a_loop.iter:
-              dim = dim_it
+          for dimIt, index in a.write.dims:
+            if index.onlyRegister == aLoop.iter:
+              dim = dimIt
               break
           if dim == -1:
             break
-          let has_dependent_read = b.reads.any_it(
+          let hasDependentRead = b.reads.anyIt(
             it.tensor == a.write.tensor and
-            it.dims[dim].only_register != b_loop.iter
+            it.dims[dim].onlyRegister != bLoop.iter
           )
-          if has_dependent_read:
+          if hasDependentRead:
             break
-          a.loops[it].fuse_next = true
+          a.loops[it].fuseNext = true
 
-proc inline_conditions(kernel: Kernel) =
+proc inlineConditions(kernel: Kernel) =
   if kernel.conds.len > 0:
     let body = kernel.expr.instrs
     kernel.expr.instrs = @[]
@@ -1651,12 +1651,12 @@ proc inline_conditions(kernel: Kernel) =
       if res == RegId(0):
         res = cond.res
       else:
-        let new_res = kernel.regs.alloc()
+        let newRes = kernel.regs.alloc()
         kernel.expr.instrs.add(Instr(kind: InstrAnd,
           args: @[res, cond.res],
-          res: new_res
+          res: newRes
         ))
-        res = new_res
+        res = newRes
     kernel.conds = @[]
     
     kernel.expr.instrs.add(Instr(kind: InstrIf,
@@ -1664,8 +1664,8 @@ proc inline_conditions(kernel: Kernel) =
       body: body
     ))
 
-proc inline_conditions*(program: Program) =
-  program.assert_pass("inline_conditions",
+proc inlineConditions*(program: Program) =
+  program.assertPass("inlineConditions",
     produces={StageConditions},
     preserves={
       StageBounds, StageGenerated, StageTensors, StageShapes,
@@ -1675,9 +1675,9 @@ proc inline_conditions*(program: Program) =
   
   for name, target in program.targets:
     for kernel in target.kernels:
-      kernel.inline_conditions()
+      kernel.inlineConditions()
 
-proc tile_loops(kernel: Kernel) =
+proc tileLoops(kernel: Kernel) =
   var it = 0
   while it < kernel.loops.len:
     let loop = kernel.loops[it]
@@ -1686,25 +1686,25 @@ proc tile_loops(kernel: Kernel) =
         outer = Loop(
           iter: kernel.regs.alloc(),
           mode: loop.mode,
-          has_bounds: true,
+          hasBounds: true,
           start: loop.start,
           stop: loop.stop,
-          step: loop.schedule.tile_size,
+          step: loop.schedule.tileSize,
           schedule: loop.schedule.dup(_.tile = false)
         )
         inner = Loop(
           iter: loop.iter,
           mode: LoopNone,
-          has_bounds: true,
+          hasBounds: true,
           start: LinearIndex(
-            factors: to_table({outer.iter: 1})
+            factors: toTable({outer.iter: 1})
           ),
           stop: LinearIndex(
-            factors: to_table({outer.iter: 1}), # TODO: Check if in bounds
-            constant: loop.schedule.tile_size
+            factors: toTable({outer.iter: 1}), # TODO: Check if in bounds
+            constant: loop.schedule.tileSize
           ),
           step: 1,
-          schedule: DEFAULT_LOOP_SCHEDULE.dup(_.share_cache = true)
+          schedule: DEFAULT_LOOP_SCHEDULE.dup(_.shareCache = true)
         )
       kernel.loops.delete(it)
       kernel.loops.insert([outer, inner], it)
@@ -1712,8 +1712,8 @@ proc tile_loops(kernel: Kernel) =
     else:
       it += 1
 
-proc tile_loops*(program: Program) =
-  program.assert_pass("tile_loops",
+proc tileLoops*(program: Program) =
+  program.assertPass("tileLoops",
     requires = {StageBounds, StageFolded},
     produces = {StageCacheSizes},
     preserves = {
@@ -1724,11 +1724,11 @@ proc tile_loops*(program: Program) =
   
   for name, target in program.targets:
     for kernel in target.kernels:
-      kernel.tile_loops()
+      kernel.tileLoops()
 
-proc bounds_size(loop: Loop, shapes: Table[TensorId, seq[int]]): (bool, int) =
+proc boundsSize(loop: Loop, shapes: Table[TensorId, seq[int]]): (bool, int) =
   let size = loop.stop - loop.start
-  var regs = init_table[RegId, int]()
+  var regs = initTable[RegId, int]()
   if size.setup.eval(shapes, regs) == EvalSuccess:
     result = (true, size.eval(regs))
   else:
@@ -1742,58 +1742,58 @@ proc eval(index: LinearIndex, regs: Table[RegId, OffsetInterval]): OffsetInterva
       result.offset = result.offset + regs[reg].offset * factor
       result.interval = result.interval + regs[reg].interval * factor
     else:
-      result.offset = result.offset + LinearIndex(factors: to_table({reg: factor}))
+      result.offset = result.offset + LinearIndex(factors: toTable({reg: factor}))
 
-proc infer_cache_sizes(kernel: Kernel,
-                       compile_target: CompileTarget,
+proc inferCacheSizes(kernel: Kernel,
+                       compileTarget: CompileTarget,
                        shapes: Table[TensorId, seq[int]]) =
-  if kernel.reads.any_it(it.schedule.cache):
+  if kernel.reads.anyIt(it.schedule.cache):
     var
-      cache_level = kernel.loops.len
+      cacheLevel = kernel.loops.len
       sizes: seq[int] = @[]
-    while cache_level > 0:
-      let loop = kernel.loops[cache_level - 1]
-      if loop.mode >= LoopParallel or not loop.schedule.share_cache:
+    while cacheLevel > 0:
+      let loop = kernel.loops[cacheLevel - 1]
+      if loop.mode >= LoopParallel or not loop.schedule.shareCache:
         break
-      let (is_static, size) = loop.bounds_size(shapes)
-      if not is_static:
+      let (isStatic, size) = loop.boundsSize(shapes)
+      if not isStatic:
         break
       sizes.add(size)
-      cache_level -= 1
+      cacheLevel -= 1
     
-    var regs = init_table[RegId, OffsetInterval]()
-    for it in cache_level..<kernel.loops.len:
+    var regs = initTable[RegId, OffsetInterval]()
+    for it in cacheLevel..<kernel.loops.len:
       let loop = kernel.loops[it]
       regs[loop.iter] = OffsetInterval(
         offset: loop.start,
         interval: Interval(min: 0, max: sizes[kernel.loops.len - it - 1] - 1)
       )
-    if compile_target == CompileGpu:
-      for it in 0..<cache_level:
+    if compileTarget == CompileGpu:
+      for it in 0..<cacheLevel:
         template loop: var Loop = kernel.loops[it]
         if loop.mode >= LoopParallel:
-          if loop.tile_offset == RegId(0):
-            loop.tile_offset = kernel.regs.alloc()
+          if loop.tileOffset == RegId(0):
+            loop.tileOffset = kernel.regs.alloc()
           regs[loop.iter] = OffsetInterval(
-            offset: init_linear_index(loop.tile_offset),
-            interval: Interval(min: 0, max: loop.schedule.tile_size - 1)
+            offset: initLinearIndex(loop.tileOffset),
+            interval: Interval(min: 0, max: loop.schedule.tileSize - 1)
           )
     
     for read in kernel.reads.mitems:
       if read.schedule.cache:
-        if read.is_raw:
+        if read.isRaw:
           continue # TODO: Support raw reads
         var cache = LocalCache(
           exists: true,
-          level: cache_level,
+          level: cacheLevel,
           reg: kernel.regs.alloc()
         )
         for dim in read.dims:
           cache.dims.add(dim.eval(regs))
         read.cache = cache
 
-proc infer_cache_sizes*(program: Program) =
-  program.assert_pass("infer_cache_sizes",
+proc inferCacheSizes*(program: Program) =
+  program.assertPass("inferCacheSizes",
     requires = {StageBounds, StageFolded},
     produces = {StageCacheSizes},
     preserves = {
@@ -1802,51 +1802,51 @@ proc infer_cache_sizes*(program: Program) =
     }
   )
   
-  let shapes = program.tensors.static_shape_table()
+  let shapes = program.tensors.staticShapeTable()
   for name, target in program.targets:
     for kernel in target.kernels:
-      kernel.infer_cache_sizes(target.compile_target, shapes)
+      kernel.inferCacheSizes(target.compileTarget, shapes)
 
-proc cache_tensor(read: TensorOp, kernel: Kernel, compile_target: CompileTarget): seq[Instr] =
+proc cacheTensor(read: TensorOp, kernel: Kernel, compileTarget: CompileTarget): seq[Instr] =
   type CacheSize = enum
     CacheEqualShape,
     CacheSmaller,
     CacheEqualSize,
     CacheLarger
   
-  var cache_shape: seq[int] = @[]
+  var cacheShape: seq[int] = @[]
   for dim in read.cache.dims:
-    cache_shape.add(dim.interval.max - dim.interval.min + 1)
+    cacheShape.add(dim.interval.max - dim.interval.min + 1)
   result.add(Instr(kind: InstrSharedCache,
-    cache_size: cache_shape.prod(),
+    cacheSize: cacheShape.prod(),
     res: read.cache.reg
   ))
   
   var
-    thread_shape: seq[int] = @[]
-    local_offset_iters: seq[RegId] = @[]
+    threadShape: seq[int] = @[]
+    localOffsetIters: seq[RegId] = @[]
     offset = LinearIndex()
     stride = 1
-  if compile_target == CompileGpu:
+  if compileTarget == CompileGpu:
     for it in countdown(kernel.loops.len - 1, 0):
       template loop: var Loop = kernel.loops[it]
       if loop.mode >= LoopParallel:
-        thread_shape.add(loop.schedule.tile_size)
-        if loop.local_offset == RegId(0):
-          loop.local_offset = kernel.regs.alloc()
-        local_offset_iters.add(loop.local_offset)
-        offset.factors[loop.local_offset] = stride
-        stride *= loop.schedule.tile_size
+        threadShape.add(loop.schedule.tileSize)
+        if loop.localOffset == RegId(0):
+          loop.localOffset = kernel.regs.alloc()
+        localOffsetIters.add(loop.localOffset)
+        offset.factors[loop.localOffset] = stride
+        stride *= loop.schedule.tileSize
   
-  thread_shape.reverse()
-  local_offset_iters.reverse()
+  threadShape.reverse()
+  localOffsetIters.reverse()
   
-  let cache_size =
-    if thread_shape == cache_shape:
+  let cacheSize =
+    if threadShape == cacheShape:
       CacheEqualShape
-    elif cache_shape.prod() < thread_shape.prod():
+    elif cacheShape.prod() < threadShape.prod():
       CacheSmaller
-    elif cache_shape.prod() == thread_shape.prod():
+    elif cacheShape.prod() == threadShape.prod():
       CacheEqualSize
     else:
       CacheLarger
@@ -1855,7 +1855,7 @@ proc cache_tensor(read: TensorOp, kernel: Kernel, compile_target: CompileTarget)
   result.add(start.instrs)
   
   let iter =
-    if cache_size in {CacheEqualShape, CacheSmaller, CacheEqualSize}:
+    if cacheSize in {CacheEqualShape, CacheSmaller, CacheEqualSize}:
       start.res
     else:
       kernel.regs.alloc()
@@ -1869,37 +1869,37 @@ proc cache_tensor(read: TensorOp, kernel: Kernel, compile_target: CompileTarget)
     let
       dim = read.cache.dims[it]
       size = dim.interval.max - dim.interval.min + 1
-      size_reg = kernel.regs.alloc()
+      sizeReg = kernel.regs.alloc()
     
-    let local_offset =
-      if cache_size == CacheEqualShape:
-        local_offset_iters[it]
+    let localOffset =
+      if cacheSize == CacheEqualShape:
+        localOffsetIters[it]
       elif it == 0:
         cur
       else:
         let offset = kernel.regs.alloc()
         body.add(Instr(kind: InstrIndex,
-          index_lit: size,
-          res: size_reg
+          indexLit: size,
+          res: sizeReg
         ))
         body.add(Instr(kind: InstrMod,
-          args: @[cur, size_reg],
+          args: @[cur, sizeReg],
           res: offset
         ))
-        let new_cur = kernel.regs.alloc()
+        let newCur = kernel.regs.alloc()
         body.add(Instr(kind: InstrIndexDiv,
-          args: @[cur, size_reg],
-          res: new_cur
+          args: @[cur, sizeReg],
+          res: newCur
         ))
-        cur = new_cur
+        cur = newCur
         offset
     
-    let read_dim = unfold(dim.offset + local_offset.init_linear_index(), kernel.regs)
-    body.add(read_dim.instrs)
-    dims.add(init_linear_index(read_dim.res))
+    let readDim = unfold(dim.offset + localOffset.initLinearIndex(), kernel.regs)
+    body.add(readDim.instrs)
+    dims.add(initLinearIndex(readDim.res))
   
   dims.reverse()
-  let index = expand_tensor_index(dims, read.tensor, kernel.regs)
+  let index = expandTensorIndex(dims, read.tensor, kernel.regs)
   body.add(index.instrs)
   let value = kernel.regs.alloc()
   body.add(Instr(kind: InstrRead,
@@ -1911,15 +1911,15 @@ proc cache_tensor(read: TensorOp, kernel: Kernel, compile_target: CompileTarget)
     args: @[read.cache.reg, iter, value]
   ))
   
-  if cache_size in {CacheEqualShape, CacheEqualSize}:
+  if cacheSize in {CacheEqualShape, CacheEqualSize}:
     result.add(body)
   else:
     let stop = kernel.regs.alloc()
     result.add(Instr(kind: InstrIndex,
-      index_lit: cache_shape.prod(),
+      indexLit: cacheShape.prod(),
       res: stop
     ))
-    if cache_size == CacheSmaller:
+    if cacheSize == CacheSmaller:
       let cond = kernel.regs.alloc()
       result.add(Instr(kind: InstrLt,
         args: @[iter, stop],
@@ -1932,22 +1932,22 @@ proc cache_tensor(read: TensorOp, kernel: Kernel, compile_target: CompileTarget)
     else:
       result.add(Instr(kind: InstrLoop,
         args: @[start.res, stop],
-        loop_iter: iter,
-        loop_step: thread_shape.prod(),
+        loopIter: iter,
+        loopStep: threadShape.prod(),
         body: body
       ))
 
-proc cache_tensors*(kernel: Kernel, compile_target: CompileTarget) =
+proc cacheTensors*(kernel: Kernel, compileTarget: CompileTarget) =
   for read in kernel.reads:
     if read.cache.exists:
-      let instrs = cache_tensor(read, kernel, compile_target)
+      let instrs = cacheTensor(read, kernel, compileTarget)
       if read.cache.level == 0:
         kernel.setup.add(instrs)
       else:
         kernel.loops[read.cache.level - 1].cache.add(instrs)
 
-proc cache_tensors*(program: Program) =
-  program.assert_pass("cache_tensors",
+proc cacheTensors*(program: Program) =
+  program.assertPass("cacheTensors",
     requires = {StageCacheSizes},
     preserves = {
       StageBounds, StageFolded, StageStaticShapes, StageGenerated,
@@ -1957,87 +1957,87 @@ proc cache_tensors*(program: Program) =
   
   for name, target in program.targets:
     for kernel in target.kernels:
-      kernel.cache_tensors(target.compile_target)
+      kernel.cacheTensors(target.compileTarget)
 
-proc inline_loop(kernel: Kernel, compile_target: CompileTarget) =
+proc inlineLoop(kernel: Kernel, compileTarget: CompileTarget) =
   let loop = kernel.loops.pop()
   if loop.cache.len > 0:
-    if compile_target == CompileGpu:
+    if compileTarget == CompileGpu:
       kernel.expr.instrs.insert(Instr(kind: InstrBarrier))
     kernel.expr.instrs.insert(loop.cache)
-    if compile_target == CompileGpu:
+    if compileTarget == CompileGpu:
       kernel.expr.instrs.insert(Instr(kind: InstrBarrier))
   if loop.mode >= LoopParallel:
-    case compile_target:
+    case compileTarget:
       of CompileCpu:
         raise StageError(msg: "Parallel loops are not supported by CPU target")
       of CompileThreads:
-        let (range_begin, range_end) = (kernel.regs.alloc(), kernel.regs.alloc())
+        let (rangeBegin, rangeEnd) = (kernel.regs.alloc(), kernel.regs.alloc())
         kernel.expr.instrs = @[Instr(kind: InstrThreads,
-          args: @[loop.start.only_register, loop.stop.only_register],
-          threads_begin: range_begin, threads_end: range_end,
+          args: @[loop.start.onlyRegister, loop.stop.onlyRegister],
+          threadsBegin: rangeBegin, threadsEnd: rangeEnd,
           body: @[Instr(kind: InstrLoop,
-            args: @[range_begin, range_end],
-            loop_iter: loop.iter,
-            loop_step: 1,
+            args: @[rangeBegin, rangeEnd],
+            loopIter: loop.iter,
+            loopStep: 1,
             body: kernel.expr.instrs
           )]
         )]
       of CompileGpu:
         var
           instr = Instr(kind: InstrGpu,
-            args: @[loop.start.only_register, loop.stop.only_register]
+            args: @[loop.start.onlyRegister, loop.stop.onlyRegister]
           )
           loops = @[loop]
         while kernel.loops.len > 0 and
               kernel.loops[^1].mode >= LoopParallel:
           let loop = kernel.loops.pop()
           loops.add(loop)
-          instr.args.add([loop.start.only_register, loop.stop.only_register])
+          instr.args.add([loop.start.onlyRegister, loop.stop.onlyRegister])
         
         var conds: seq[RegId] = @[]
         for it, loop in loops:
           let
-            local_offset =
-              if loop.local_offset != RegId(0):
-                loop.local_offset
+            localOffset =
+              if loop.localOffset != RegId(0):
+                loop.localOffset
               else:
                 kernel.regs.alloc()
             index = GpuIndex(
               group: kernel.regs.alloc(),
-              local: local_offset,
-              size: loop.schedule.tile_size
+              local: localOffset,
+              size: loop.schedule.tileSize
             )
             offset =
-              if loop.tile_offset != RegId(0):
-                loop.tile_offset
+              if loop.tileOffset != RegId(0):
+                loop.tileOffset
               else:
                 kernel.regs.alloc()
-            size_reg = kernel.regs.alloc()
+            sizeReg = kernel.regs.alloc()
           instr.body.add(Instr(kind: InstrIndex,
-            index_lit: index.size,
-            res: size_reg
+            indexLit: index.size,
+            res: sizeReg
           ))
           instr.body.add(Instr(kind: InstrMul,
-            args: @[index.group, size_reg],
+            args: @[index.group, sizeReg],
             res: offset
           ))
           instr.body.add(Instr(kind: InstrAdd,
             args: @[offset, index.local],
             res: loop.iter
           ))
-          instr.gpu_indices.add(index)
+          instr.gpuIndices.add(index)
           
           if loop.stop.setup[^1].kind != InstrIndex or
-             loop.stop.setup[^1].index_lit mod index.size != 0:
+             loop.stop.setup[^1].indexLit mod index.size != 0:
             let
-              is_in_range = kernel.regs.alloc()
+              isInRange = kernel.regs.alloc()
               max = loop.stop.setup[^1].res
             instr.body.add(Instr(kind: InstrLt,
               args: @[loop.iter, max],
-              res: is_in_range
+              res: isInRange
             ))
-            conds.add(is_in_range)
+            conds.add(isInRange)
         
         if conds.len > 0:
           var cond = conds[0]
@@ -2062,42 +2062,42 @@ proc inline_loop(kernel: Kernel, compile_target: CompileTarget) =
         return
   else:
     kernel.expr.instrs = @[Instr(kind: InstrLoop,
-      args: @[loop.start.only_register, loop.stop.only_register],
-      loop_iter: loop.iter,
-      loop_step: loop.step,
-      loop_fuse_next: loop.fuse_next,
+      args: @[loop.start.onlyRegister, loop.stop.onlyRegister],
+      loopIter: loop.iter,
+      loopStep: loop.step,
+      loopFuseNext: loop.fuseNext,
       body: kernel.expr.instrs
     )]
   kernel.expr.instrs.insert(loop.start.setup)
   kernel.expr.instrs.insert(loop.stop.setup)
 
-proc inline_loops(target: Target, cur, until_level: int) =
+proc inlineLoops(target: Target, cur, untilLevel: int) =
   let kernel = target.kernels[cur]
-  while kernel.loops.len > until_level:
-    while kernel.loops[^1].fuse_next:
-      target.inline_loops(cur + 1, kernel.loops.len)
-      let next_kernel = target.kernels[cur + 1]
+  while kernel.loops.len > untilLevel:
+    while kernel.loops[^1].fuseNext:
+      target.inlineLoops(cur + 1, kernel.loops.len)
+      let nextKernel = target.kernels[cur + 1]
       var
-        instrs = next_kernel.expr.instrs
-        setup = next_kernel.setup
-        subs = init_table[RegId, RegId]()
+        instrs = nextKernel.expr.instrs
+        setup = nextKernel.setup
+        subs = initTable[RegId, RegId]()
       for it in 0..<kernel.loops.len:
-        subs[next_kernel.loops[it].iter] = kernel.loops[it].iter
-      for it in 0..<next_kernel.regs.len:
+        subs[nextKernel.loops[it].iter] = kernel.loops[it].iter
+      for it in 0..<nextKernel.regs.len:
         let reg = RegId(it + 1)
         if reg notin subs:
-          subs[reg] = kernel.regs.alloc(next_kernel.regs[it])
+          subs[reg] = kernel.regs.alloc(nextKernel.regs[it])
       instrs.substitute(subs)
       setup.substitute(subs)
       kernel.expr.instrs.add(instrs)
       kernel.setup.add(setup)
       for it in 0..<kernel.loops.len:
-        kernel.loops[it].fuse_next = next_kernel.loops[it].fuse_next
+        kernel.loops[it].fuseNext = nextKernel.loops[it].fuseNext
       target.kernels.delete(cur + 1)
-    kernel.inline_loop(target.compile_target)
+    kernel.inlineLoop(target.compileTarget)
 
-proc inline_loops*(program: Program) =
-  program.assert_pass("inline_loops",
+proc inlineLoops*(program: Program) =
+  program.assertPass("inlineLoops",
     requires={StageBounds, StageConditions},
     produces={StageLoops},
     preserves={
@@ -2109,39 +2109,39 @@ proc inline_loops*(program: Program) =
   for name, target in program.targets.mpairs:
     var it = 0
     while it < target.kernels.len:
-      target.inline_loops(it, 0)
+      target.inlineLoops(it, 0)
       it += 1
     
     for kernel in target.kernels:
       kernel.setup.add(kernel.expr.instrs)
       kernel.expr = Expr()
 
-proc lift_invariants(instrs: var seq[Instr],
+proc liftInvariants(instrs: var seq[Instr],
                      regs: var seq[int],
                      levels: var seq[seq[Instr]],
-                     min_level: int) =
+                     minLevel: int) =
   var it = 0
   while it < instrs.len:
     let instr = instrs[it]
     if instr.body.len > 0:
       levels.add(@[])
-      var body_min_level = min_level
+      var bodyMinLevel = minLevel
       case instr.kind:
         of InstrLoop:
-          regs[instr.loop_iter] = levels.len
+          regs[instr.loopIter] = levels.len
         of InstrThreads:
-          regs[instr.threads_begin] = levels.len
-          regs[instr.threads_end] = levels.len
-          body_min_level = levels.len
+          regs[instr.threadsBegin] = levels.len
+          regs[instr.threadsEnd] = levels.len
+          bodyMinLevel = levels.len
         of InstrGpu:
-          for index in instr.gpu_indices:
+          for index in instr.gpuIndices:
             regs[index.local] = levels.len
             regs[index.group] = levels.len
-          body_min_level = levels.len
+          bodyMinLevel = levels.len
         of InstrIf:
-          body_min_level = levels.len # TODO: Only for InstrRead, InstrArrayRead, ...
+          bodyMinLevel = levels.len # TODO: Only for InstrRead, InstrArrayRead, ...
         else: discard
-      instrs[it].body.lift_invariants(regs, levels, body_min_level)
+      instrs[it].body.liftInvariants(regs, levels, bodyMinLevel)
       let level = levels.pop()
       instrs.insert(level, it)
       it += level.len
@@ -2150,26 +2150,26 @@ proc lift_invariants(instrs: var seq[Instr],
       if instr.res != RegId(0):
         regs[instr.res] = levels.len 
     else:
-      var instr_level = 0
+      var instrLevel = 0
       if instr.kind notin {InstrShape, InstrLen, InstrShapeLen, InstrEpoch}:
-        instr_level = min_level
+        instrLevel = minLevel
       
       for arg in instr.args:
-        if regs[arg] > instr_level:
-          instr_level = regs[arg]
+        if regs[arg] > instrLevel:
+          instrLevel = regs[arg]
       
       if instr.res != RegId(0):
-        regs[instr.res] = instr_level
+        regs[instr.res] = instrLevel
       
-      if instr_level < levels.len:
-        levels[instr_level].add(instr)
+      if instrLevel < levels.len:
+        levels[instrLevel].add(instr)
         instrs.delete(it)
         continue
     
     it += 1
 
-proc lift_invariants*(program: Program) =
-  program.assert_pass("lift_invariants",
+proc liftInvariants*(program: Program) =
+  program.assertPass("liftInvariants",
     produces={},
     requires={StageTensorInstrs},
     preserves={
@@ -2182,23 +2182,23 @@ proc lift_invariants*(program: Program) =
   for name, target in program.targets:
     for kernel in target.kernels:
       var
-        regs = new_seq[int](kernel.regs.len)
+        regs = newSeq[int](kernel.regs.len)
         levels: seq[seq[Instr]] = @[]
-      kernel.setup.lift_invariants(regs, levels, 0)
+      kernel.setup.liftInvariants(regs, levels, 0)
 
-proc collect_closures(instrs: var seq[Instr], regs: var seq[int], level: int): HashSet[RegId] =
+proc collectClosures(instrs: var seq[Instr], regs: var seq[int], level: int): HashSet[RegId] =
   for instr in instrs.mitems:
-    var used = instr.body.collect_closures(regs, level + 1)
+    var used = instr.body.collectClosures(regs, level + 1)
     
     # TODO: Refactor using iterator which returns all registers defined by the instruction
     case instr.kind:
       of InstrLoop:
-        regs[instr.loop_iter] = level + 1
+        regs[instr.loopIter] = level + 1
       of InstrThreads:
-        regs[instr.threads_begin] = level + 1
-        regs[instr.threads_end] = level + 1
+        regs[instr.threadsBegin] = level + 1
+        regs[instr.threadsEnd] = level + 1
       of InstrGpu:
-        for index in instr.gpu_indices:
+        for index in instr.gpuIndices:
           regs[index.local] = level + 1
           regs[index.group] = level + 1
       else: discard
@@ -2210,12 +2210,12 @@ proc collect_closures(instrs: var seq[Instr], regs: var seq[int], level: int): H
           closure.regs.add(reg)
       
       var tensors: seq[TensorId] = @[]
-      for tensor in instr.body.collect_tensors():
+      for tensor in instr.body.collectTensors():
         closure.tensors.add(tensor)
       
       case instr.kind:
-        of InstrThreads: instr.threads_closure = closure
-        of InstrGpu: instr.gpu_closure = closure
+        of InstrThreads: instr.threadsClosure = closure
+        of InstrGpu: instr.gpuClosure = closure
         else: discard
     
     for arg in instr.args:
@@ -2226,8 +2226,8 @@ proc collect_closures(instrs: var seq[Instr], regs: var seq[int], level: int): H
     
     result = result.union(used)
 
-proc collect_closures*(program: Program) =
-  program.assert_pass("collect_closures",
+proc collectClosures*(program: Program) =
+  program.assertPass("collectClosures",
     produces={},
     requires={StageLoops},
     preserves={
@@ -2239,11 +2239,11 @@ proc collect_closures*(program: Program) =
   
   for name, target in program.targets:
     for kernel in target.kernels:
-      var regs = new_seq[int](kernel.regs.len)
-      discard kernel.setup.collect_closures(regs, 0)
+      var regs = newSeq[int](kernel.regs.len)
+      discard kernel.setup.collectClosures(regs, 0)
 
-proc extract_closure(regs: seq[bool], closure: ParallelClosure): seq[bool] =
-  result = new_seq[bool](regs.len)
+proc extractClosure(regs: seq[bool], closure: ParallelClosure): seq[bool] =
+  result = newSeq[bool](regs.len)
   for reg in closure.regs:
     if not regs[reg]:
       raise ValidationError(msg: $reg & " cannot be captured because it is not defined")
@@ -2259,16 +2259,16 @@ proc validate(instrs: seq[Instr], regs: var seq[bool]) =
       of InstrIf:
         instr.body.validate(regs)
       of InstrLoop:
-        regs[instr.loop_iter] = true
+        regs[instr.loopIter] = true
         instr.body.validate(regs)
       of InstrThreads:
-        var closure = regs.extract_closure(instr.threads_closure)
-        closure[instr.threads_begin] = true
-        closure[instr.threads_end] = true
+        var closure = regs.extractClosure(instr.threadsClosure)
+        closure[instr.threadsBegin] = true
+        closure[instr.threadsEnd] = true
         instr.body.validate(closure)
       of InstrGpu:
-        var closure = regs.extract_closure(instr.gpu_closure)
-        for index in instr.gpu_indices:
+        var closure = regs.extractClosure(instr.gpuClosure)
+        for index in instr.gpuIndices:
           closure[index.local] = true
           closure[index.group] = true
         instr.body.validate(closure)
@@ -2286,7 +2286,7 @@ proc validate(index: LinearIndex, regs: var seq[bool]) =
 proc validate(kernel: Kernel) =
   if kernel.generator.kind != GenNone:
     return
-  var regs = new_seq[bool](kernel.regs.len)
+  var regs = newSeq[bool](kernel.regs.len)
   kernel.setup.validate(regs)
   for loop in kernel.loops:
     loop.start.validate(regs)
@@ -2298,7 +2298,7 @@ proc validate(kernel: Kernel) =
   kernel.expr.instrs.validate(regs)
 
 proc validate*(program: Program) =
-  program.assert_pass("validate", preserves = ALL_STAGES)
+  program.assertPass("validate", preserves = ALL_STAGES)
   
   for name, target in program.targets:
     for kernel in target.kernels:

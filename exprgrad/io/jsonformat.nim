@@ -15,51 +15,51 @@
 # Fast JSON parser
 
 import std/[macros, strutils, tables]
-import std/json except parse_json
+import std/json except parseJson
 import faststreams
 
-proc read_name(stream: var ReadStream): string =
-  result = stream.read_until({' ', '\n', '\t', '\r', '{', '}', '[', ']', '\"', ',', ':'})
+proc readName(stream: var ReadStream): string =
+  result = stream.readUntil({' ', '\n', '\t', '\r', '{', '}', '[', ']', '\"', ',', ':'})
 
-proc parse_json*(stream: var ReadStream, value: var bool) =
-  stream.skip_whitespace()
-  let name = stream.read_name()
+proc parseJson*(stream: var ReadStream, value: var bool) =
+  stream.skipWhitespace()
+  let name = stream.readName()
   case name:
     of "true": value = true
     of "false": value = false
-    else: raise new_exception(ValueError, name & " is not a valid bool value")
+    else: raise newException(ValueError, name & " is not a valid bool value")
 
-proc parse_json*(stream: var ReadStream, value: var int) =
-  stream.skip_whitespace()
-  var is_negated = false
-  if stream.take_char('-'):
-    is_negated = true
+proc parseJson*(stream: var ReadStream, value: var int) =
+  stream.skipWhitespace()
+  var isNegated = false
+  if stream.takeChar('-'):
+    isNegated = true
   else:
-    discard stream.take_char('+')
+    discard stream.takeChar('+')
   value = 0
-  while stream.peek_char() in '0'..'9':
+  while stream.peekChar() in '0'..'9':
     value *= 10
-    value += ord(stream.read_char()) - ord('0')
-  if is_negated:
+    value += ord(stream.readChar()) - ord('0')
+  if isNegated:
     value *= -1
 
-proc parse_json*(stream: var ReadStream, value: var float) =
-  stream.skip_whitespace()
-  value = stream.read_name().parse_float()
+proc parseJson*(stream: var ReadStream, value: var float) =
+  stream.skipWhitespace()
+  value = stream.readName().parseFloat()
 
-proc parse_json*(stream: var ReadStream, value: var string) =
+proc parseJson*(stream: var ReadStream, value: var string) =
   value = ""
-  stream.skip_whitespace()
-  if not stream.take_char('\"'):
-    raise new_exception(ValueError, "Expected \" at start of string")
+  stream.skipWhitespace()
+  if not stream.takeChar('\"'):
+    raise newException(ValueError, "Expected \" at start of string")
   
-  while not stream.take_char('\"'):
-    if stream.at_end:
-      raise new_exception(ValueError, "Expected \" at end of string")
+  while not stream.takeChar('\"'):
+    if stream.atEnd:
+      raise newException(ValueError, "Expected \" at end of string")
     
-    let chr = stream.read_char()
+    let chr = stream.readChar()
     if chr == '\\':
-      case stream.read_char():
+      case stream.readChar():
         of '\"': value.add('\"')
         of '\\': value.add('\\')
         of '/': value.add('/')
@@ -68,109 +68,109 @@ proc parse_json*(stream: var ReadStream, value: var string) =
         of 'n': value.add('\n')
         of 'r': value.add('\r')
         of 't': value.add('\t')
-        of 'u': raise new_exception(ValueError, "Not implemented")
+        of 'u': raise newException(ValueError, "Not implemented")
         else:
-          raise new_exception(ValueError, "Invalid escape code")
+          raise newException(ValueError, "Invalid escape code")
     else:
       value.add(chr)
 
-iterator iter_json_array*(stream: var ReadStream): int =
-  stream.skip_whitespace()
-  if not stream.take_char('['):
-    raise new_exception(ValueError, "Expected [ at start of json array")
-  stream.skip_whitespace()
+iterator iterJsonArray*(stream: var ReadStream): int =
+  stream.skipWhitespace()
+  if not stream.takeChar('['):
+    raise newException(ValueError, "Expected [ at start of json array")
+  stream.skipWhitespace()
   var it = 0
   while true:
-    if stream.peek_char() == ']':
+    if stream.peekChar() == ']':
       break
     yield it
-    stream.skip_whitespace()
-    if not stream.take_char(','):
+    stream.skipWhitespace()
+    if not stream.takeChar(','):
       break
-    stream.skip_whitespace()
+    stream.skipWhitespace()
     it += 1
-  if not stream.take_char(']'):
-    raise new_exception(ValueError, "Expected ] at end of json array")
+  if not stream.takeChar(']'):
+    raise newException(ValueError, "Expected ] at end of json array")
 
-iterator iter_json_object*(stream: var ReadStream): string =
-  stream.skip_whitespace()
-  if not stream.take_char('{'):
-    raise new_exception(ValueError, "Expected { at start of json array")
+iterator iterJsonObject*(stream: var ReadStream): string =
+  stream.skipWhitespace()
+  if not stream.takeChar('{'):
+    raise newException(ValueError, "Expected { at start of json array")
   
-  stream.skip_whitespace()
+  stream.skipWhitespace()
   while true:
-    if stream.peek_char() == '}':
+    if stream.peekChar() == '}':
       break
     var name = ""
-    stream.parse_json(name)
-    stream.skip_whitespace()
-    if not stream.take_char(':'):
-      raise new_exception(ValueError, "Expected colon after object key")
+    stream.parseJson(name)
+    stream.skipWhitespace()
+    if not stream.takeChar(':'):
+      raise newException(ValueError, "Expected colon after object key")
     yield name
-    stream.skip_whitespace()
-    if not stream.take_char(','):
+    stream.skipWhitespace()
+    if not stream.takeChar(','):
       break
-    stream.skip_whitespace()
+    stream.skipWhitespace()
   
-  if not stream.take_char('}'):
-    raise new_exception(ValueError, "Expected } at end of json object")
+  if not stream.takeChar('}'):
+    raise newException(ValueError, "Expected } at end of json object")
 
-proc parse_json*[T](stream: var ReadStream, value: var seq[T]) =
-  mixin parse_json
-  value = new_seq[T]()
-  for it in stream.iter_json_array():
+proc parseJson*[T](stream: var ReadStream, value: var seq[T]) =
+  mixin parseJson
+  value = newSeq[T]()
+  for it in stream.iterJsonArray():
     var item: T
-    stream.parse_json(item)
+    stream.parseJson(item)
     value.add(item)
 
-proc parse_json*[L, T](stream: var ReadStream, value: var array[L, T]) =
-  mixin parse_json
+proc parseJson*[L, T](stream: var ReadStream, value: var array[L, T]) =
+  mixin parseJson
   var count = 0
-  for it in stream.iter_json_array():
-    stream.parse_json(value[it])
+  for it in stream.iterJsonArray():
+    stream.parseJson(value[it])
     count += 1
   if count != value.len:
-    raise new_exception(ValueError, "Expected exactly " & $value.len & " items in array")
+    raise newException(ValueError, "Expected exactly " & $value.len & " items in array")
 
-proc parse_json*[T](stream: var ReadStream, tab: var Table[string, T]) =
-  mixin parse_json
-  tab = init_table[string, T]()
-  for name in stream.iter_json_object():
+proc parseJson*[T](stream: var ReadStream, tab: var Table[string, T]) =
+  mixin parseJson
+  tab = initTable[string, T]()
+  for name in stream.iterJsonObject():
     var value: T
-    stream.parse_json(value)
+    stream.parseJson(value)
     tab[name] = value
 
-proc parse_json*(stream: var ReadStream, node: var JsonNode) =
-  stream.skip_whitespace()
-  case stream.peek_char():
+proc parseJson*(stream: var ReadStream, node: var JsonNode) =
+  stream.skipWhitespace()
+  case stream.peekChar():
     of '[':
-      node = new_jarray()
-      for it in stream.iter_json_array():
+      node = newJArray()
+      for it in stream.iterJsonArray():
         var child: JsonNode = nil
-        stream.parse_json(child)
+        stream.parseJson(child)
         node.add(child)
     of '{':
-      node = new_jobject()
-      for name in stream.iter_json_object():
+      node = newJObject()
+      for name in stream.iterJsonObject():
         var child: JsonNode = nil
-        stream.parse_json(child)
+        stream.parseJson(child)
         node[name] = child
     of '\"':
       var str = ""
-      stream.parse_json(str)
-      node = new_jstring(str)
+      stream.parseJson(str)
+      node = newJString(str)
     else:
-      let name = stream.read_name()
+      let name = stream.readName()
       case name:
         of "null":
-          node = new_jnull()
+          node = newJNull()
         of "true", "false":
-          node = new_jbool(name == "true")
+          node = newJBool(name == "true")
         else:
           if '.' in name:
-            node = new_jfloat(parse_float(name))
+            node = newJFloat(parseFloat(name))
           else:
-            node = new_jint(parse_int(name))
+            node = newJInt(parseInt(name))
 
 type
   FieldKind = enum
@@ -181,159 +181,159 @@ type
     typ: NimNode
     kind: FieldKind
 
-proc unwrap_name(node: NimNode): NimNode =
+proc unwrapName(node: NimNode): NimNode =
   result = node
   while result.kind notin {nnkIdent, nnkSym}:
     case result.kind:
       of nnkPostfix: result = result[1]
       else: error("Unable to unwrap name from " & $result.kind)
 
-proc collect_fields(node: NimNode, kind: FieldKind = FieldNone): seq[Field] =
+proc collectFields(node: NimNode, kind: FieldKind = FieldNone): seq[Field] =
   case node.kind:
     of nnkRecList, nnkElse:
       for def in node:
-        result.add(def.collect_fields(kind))
+        result.add(def.collectFields(kind))
     of nnkIdentDefs:
       for it in 0..<(node.len - 2):
         result.add(Field(
-          name: node[it].unwrap_name().str_val,
+          name: node[it].unwrapName().strVal,
           typ: node[^2],
           kind: kind
         ))
     of nnkRecCase:
-      result.add(node[0].collect_fields(FieldDiscr))
+      result.add(node[0].collectFields(FieldDiscr))
       for it in 1..<node.len:
-        result.add(node[it].collect_fields(FieldCase))
+        result.add(node[it].collectFields(FieldCase))
     of nnkOfBranch:
       for it in 1..<node.len:
-        result.add(node[it].collect_fields(kind))
+        result.add(node[it].collectFields(kind))
     else:
       discard
 
-proc gen_field_assignments(node: NimNode, stmts: NimNode) =
+proc genFieldAssignments(node: NimNode, stmts: NimNode) =
   case node.kind:
     of nnkRecList:
       for child in node:
-        child.gen_field_assignments(stmts)
+        child.genFieldAssignments(stmts)
     of nnkIdentDefs:
       let value = ident("value")
       for it in 0..<(node.len - 2):
-        let name = node[it].unwrap_name().str_val
-        stmts.add(new_assignment(
-          new_tree(nnkDotExpr, value, ident(name)),
+        let name = node[it].unwrapName().strVal
+        stmts.add(newAssignment(
+          newTree(nnkDotExpr, value, ident(name)),
           ident(name)
         ))
     of nnkOfBranch:
-      let body = new_stmt_list()
+      let body = newStmtList()
       for it in 1..<node.len:
-        node[it].gen_field_assignments(body)
-      stmts.add(new_tree(nnkOfBranch, node[0], body))
+        node[it].genFieldAssignments(body)
+      stmts.add(newTree(nnkOfBranch, node[0], body))
     of nnkElse:
-      let body = new_stmt_list()
+      let body = newStmtList()
       for child in node:
-        child.gen_field_assignments(body)
-      stmts.add(new_tree(nnkElse, body))
+        child.genFieldAssignments(body)
+      stmts.add(newTree(nnkElse, body))
     of nnkRecCase:
       let
-        discr = node[0][0].unwrap_name().str_val
-        case_stmt = new_tree(nnkCaseStmt, ident(discr))
+        discr = node[0][0].unwrapName().strVal
+        caseStmt = newTree(nnkCaseStmt, ident(discr))
       for it in 1..<node.len:
-        node[it].gen_field_assignments(case_stmt)
-      stmts.add(case_stmt)
+        node[it].genFieldAssignments(caseStmt)
+      stmts.add(caseStmt)
     else:
       discard
 
-proc gen_parser(typ, name, stmts: NimNode) =
+proc genParser(typ, name, stmts: NimNode) =
   let (stream, value) = (ident("stream"), ident("value"))
   case typ.kind:
     of nnkSym, nnkIdent:
-      typ.get_impl().gen_parser(typ, stmts)
+      typ.getImpl().genParser(typ, stmts)
     of nnkTypeDef:
-      typ[^1].gen_parser(name, stmts)
+      typ[^1].genParser(name, stmts)
     of nnkEnumTy:
       stmts.add: quote:
         var id: int
-        parse_json(`stream`, id)
+        parseJson(`stream`, id)
         `value` = `name`(id)
     of nnkObjectTy:
-      typ[2].gen_parser(name, stmts)
+      typ[2].genParser(name, stmts)
     of nnkRecList:
       var
-        fields = typ.collect_fields()
+        fields = typ.collectFields()
       
-      let var_section = new_tree(nnkVarSection)
+      let varSection = newTree(nnkVarSection)
       for field in fields:
-        var_section.add(new_tree(nnkIdentDefs,
-          ident(field.name), field.typ, new_empty_node()
+        varSection.add(newTree(nnkIdentDefs,
+          ident(field.name), field.typ, newEmptyNode()
         ))
-      stmts.add(var_section)
+      stmts.add(varSection)
       
       let
-        field_name_sym = gen_sym(nskForVar, "field_name")
-        case_stmt = new_tree(nnkCaseStmt, new_call(
-          bind_sym("nim_ident_normalize"), field_name_sym
+        fieldNameSym = genSym(nskForVar, "fieldName")
+        caseStmt = newTree(nnkCaseStmt, newCall(
+          bindSym("nimIdentNormalize"), fieldNameSym
         ))
       for field in fields:
         var target = ident(field.name)
-        case_stmt.add(new_tree(nnkOfBranch,
-          new_lit(nim_ident_normalize(field.name)),
-          new_stmt_list(new_call("parse_json", stream, target))
+        caseStmt.add(newTree(nnkOfBranch,
+          newLit(nimIdentNormalize(field.name)),
+          newStmtList(newCall("parseJson", stream, target))
         ))
-      case_stmt.add: new_tree(nnkElse): quote:
-        raise new_exception(ValueError, "Unknown field")
-      stmts.add(new_tree(nnkForStmt,
-        field_name_sym,
-        new_call(bind_sym("iter_json_object"), stream),
-        new_stmt_list(case_stmt)
+      caseStmt.add: newTree(nnkElse): quote:
+        raise newException(ValueError, "Unknown field")
+      stmts.add(newTree(nnkForStmt,
+        fieldNameSym,
+        newCall(bindSym("iterJsonObject"), stream),
+        newStmtList(caseStmt)
       ))
       
-      let constr = new_tree(nnkObjConstr, name)
+      let constr = newTree(nnkObjConstr, name)
       for field in fields:
         if field.kind == FieldDiscr:
-          constr.add(new_tree(nnkExprColonExpr,
+          constr.add(newTree(nnkExprColonExpr,
             ident(field.name), ident(field.name)
           ))
-      stmts.add(new_assignment(value, constr))
-      typ.gen_field_assignments(stmts)
+      stmts.add(newAssignment(value, constr))
+      typ.genFieldAssignments(stmts)
     else:
       error("Unable to generate json parser for " & $typ.kind)
 
-proc gen_parser(typ: NimNode): NimNode =
+proc genParser(typ: NimNode): NimNode =
   let
-    body = new_stmt_list()
+    body = newStmtList()
     (stream, value) = (ident("stream"), ident("value"))
-  typ.gen_parser(nil, body)
+  typ.genParser(nil, body)
   result = quote:
-    proc parse_json(`stream`: var ReadStream, `value`: var `typ`) =
+    proc parseJson(`stream`: var ReadStream, `value`: var `typ`) =
       `body`
 
-macro json_serializable*(types: varargs[typed]): untyped =
-  result = new_stmt_list()
+macro jsonSerializable*(types: varargs[typed]): untyped =
+  result = newStmtList()
   for typ in types:
-    result.add(typ.gen_parser())
+    result.add(typ.genParser())
   echo result.repr
 
-proc parse_json*[T](str: string): T =
-  mixin parse_json
-  var stream = init_read_stream(str)
+proc parseJson*[T](str: string): T =
+  mixin parseJson
+  var stream = initReadStream(str)
   defer: stream.close()
-  stream.parse_json(result)
+  stream.parseJson(result)
 
-proc load_json*[T](path: string): T =
-  mixin parse_json
-  var stream = open_read_stream(path)
+proc loadJson*[T](path: string): T =
+  mixin parseJson
+  var stream = openReadStream(path)
   defer: stream.close()
-  stream.parse_json(result)
+  stream.parseJson(result)
 
-proc new_jarray*(children: openArray[JsonNode]): JsonNode =
-  result = new_jarray()
+proc newJarray*(children: openArray[JsonNode]): JsonNode =
+  result = newJArray()
   for child in children:
     result.add(child)
 
-proc new_jobject*(children: openArray[(string, JsonNode)]): JsonNode =
-  result = new_jobject()
+proc newJobject*(children: openArray[(string, JsonNode)]): JsonNode =
+  result = newJObject()
   for (name, value) in children:
     result[name] = value
 
-export JsonNode, new_jnull, new_jbool, new_jint, new_jfloat
-export new_jstring, new_jarray, new_jobject, json.`$`, json.`==`
+export JsonNode, newJNull, newJBool, newJInt, newJFloat
+export newJString, newJArray, newJObject, json.`$`, json.`==`

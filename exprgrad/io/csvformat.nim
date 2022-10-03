@@ -17,13 +17,13 @@
 import std/[macros, strutils]
 import faststreams
 
-template csv_column*(name: string) {.pragma.}
-template csv_ignore*(columns: varargs[string]) {.pragma.}
-template csv_parser*(parser: proc) {.pragma.}
+template csvColumn*(name: string) {.pragma.}
+template csvIgnore*(columns: varargs[string]) {.pragma.}
+template csvParser*(parser: proc) {.pragma.}
 
-proc parse_csv_cell*(str: string, value: var int) = value = parse_int(str.strip())
-proc parse_csv_cell*(str: string, value: var float) = value = parse_float(str.strip())
-proc parse_csv_cell*(str: string, value: var string) = value = str
+proc parseCsvCell*(str: string, value: var int) = value = parseInt(str.strip())
+proc parseCsvCell*(str: string, value: var float) = value = parseFloat(str.strip())
+proc parseCsvCell*(str: string, value: var string) = value = str
 
 type CsvFormat* = object
   delim*: char
@@ -38,19 +38,19 @@ const DEFAULT_CSV_FORMAT* = CsvFormat(
   newline: '\n'
 )
 
-proc read_csv_row(stream: var ReadStream, format = DEFAULT_CSV_FORMAT): seq[string] =
+proc readCsvRow(stream: var ReadStream, format = DEFAULT_CSV_FORMAT): seq[string] =
   var
     value = ""
-    is_str = false
-  while not stream.at_end():
-    let chr = stream.read_char()
-    if chr == format.newline and not is_str:
+    isStr = false
+  while not stream.atEnd():
+    let chr = stream.readChar()
+    if chr == format.newline and not isStr:
       break
-    elif chr == format.delim and not is_str:
+    elif chr == format.delim and not isStr:
       result.add(value)
       value = ""
     elif chr == format.escape:
-      let escaped = stream.read_char()
+      let escaped = stream.readChar()
       case escaped:
         of 'n': value.add('\n')
         of 'r': value.add('\r')
@@ -58,7 +58,7 @@ proc read_csv_row(stream: var ReadStream, format = DEFAULT_CSV_FORMAT): seq[stri
         else:
           value.add(escaped)
     elif chr == format.quote:
-      is_str = not is_str
+      isStr = not isStr
     else:
       value.add(chr)
   result.add(value)
@@ -68,15 +68,15 @@ type Field = object
   column: string
   parser: NimNode
 
-proc collect_fields(typ: NimNode): seq[Field] =
+proc collectFields(typ: NimNode): seq[Field] =
   case typ.kind:
     of nnkSym:
-      result = typ.get_impl().collect_fields()
+      result = typ.getImpl().collectFields()
     of nnkTypeDef, nnkObjectTy:
-      result = typ[^1].collect_fields()
+      result = typ[^1].collectFields()
     of nnkRecList:
       for child in typ:
-        result.add(child.collect_fields())
+        result.add(child.collectFields())
     of nnkRecCase:
       error("Variant types are not allowed in CSV rows.")
     of nnkIdentDefs:
@@ -91,105 +91,105 @@ proc collect_fields(typ: NimNode): seq[Field] =
               for pragma in ident[1]:
                 if pragma.len < 2 or pragma[0].kind notin {nnkSym, nnkIdent}:
                   continue
-                case nim_ident_normalize(pragma[0].str_val):
-                  of "csvcolumn": field.column = pragma[1].str_val
+                case nimIdentNormalize(pragma[0].strVal):
+                  of "csvcolumn": field.column = pragma[1].strVal
                   of "csvparser": field.parser = pragma[1]
                   else: discard
               ident = ident[0]
             else:
               error("")
-        field.name = ident.str_val
+        field.name = ident.strVal
         if field.column.len == 0:
           field.column = field.name
-        if field.parser.is_nil:
-          field.parser = ident("parse_csv_cell")
+        if field.parser.isNil:
+          field.parser = ident("parseCsvCell")
         result.add(field)
     else:
       error("Unable to collect fields for " & $typ.kind)
 
-proc collect_ignored(typ: NimNode): seq[string] =
+proc collectIgnored(typ: NimNode): seq[string] =
   case typ.kind:
-    of nnkSym: result = typ.get_impl().collect_ignored()
+    of nnkSym: result = typ.getImpl().collectIgnored()
     of nnkTypeDef:
       if typ[0].kind == nnkPragmaExpr:
-        result = typ[0].collect_ignored()
-    of nnkPostfix: result = typ[1].collect_ignored()
-    of nnkStrLit: result = @[typ.str_val]
+        result = typ[0].collectIgnored()
+    of nnkPostfix: result = typ[1].collectIgnored()
+    of nnkStrLit: result = @[typ.strVal]
     of nnkBracket:
       for child in typ:
-        result.add(child.collect_ignored())
+        result.add(child.collectIgnored())
     of nnkPragmaExpr:
       for pragma in typ[1]:
         if pragma.len >= 2 and
            pragma[0].kind in {nnkSym, nnkIdent} and
-           nim_ident_normalize(pragma[0].str_val) == "csvignore":
+           nimIdentNormalize(pragma[0].strVal) == "csvignore":
           for it in 1..<pragma.len:
-            result.add(pragma[it].collect_ignored())
+            result.add(pragma[it].collectIgnored())
     else: discard
 
-macro build_cell_indices(header, typ: typed): untyped =
-  result = new_stmt_list()
+macro buildCellIndices(header, typ: typed): untyped =
+  result = newStmtList()
   let
     indices = ident("indices")
     (index, column) = (ident("index"), ident("column"))
   let
-    type_inst = get_type_inst(typ)[1]
-    fields = type_inst.collect_fields()
-    ignored = type_inst.collect_ignored()
-    tuple_constr = new_nim_node(nnkTupleConstr)
-    case_stmt = new_tree(nnkCaseStmt, column)
+    typeInst = getTypeInst(typ)[1]
+    fields = typeInst.collectFields()
+    ignored = typeInst.collectIgnored()
+    tupleConstr = newNimNode(nnkTupleConstr)
+    caseStmt = newTree(nnkCaseStmt, column)
   
   for field in fields:
-    tuple_constr.add(new_tree(nnkExprColonExpr, ident(field.name), new_lit(-1)))
-    case_stmt.add(new_tree(nnkOfBranch, 
-      new_lit(field.column),
-      new_stmt_list(new_assignment(
-        new_tree(nnkDotExpr, indices, ident(field.name)), index
+    tupleConstr.add(newTree(nnkExprColonExpr, ident(field.name), newLit(-1)))
+    caseStmt.add(newTree(nnkOfBranch, 
+      newLit(field.column),
+      newStmtList(newAssignment(
+        newTree(nnkDotExpr, indices, ident(field.name)), index
       ))
     ))
   
   for column in ignored:
-    case_stmt.add(new_tree(nnkOfBranch, new_lit(column),
-      new_stmt_list(new_tree(nnkDiscardStmt, new_empty_node()))
+    caseStmt.add(newTree(nnkOfBranch, newLit(column),
+      newStmtList(newTree(nnkDiscardStmt, newEmptyNode()))
     ))
   
-  let else_body = quote:
-    raise new_exception(ValueError,
+  let elseBody = quote:
+    raise newException(ValueError,
       "\"" & `column` & "\" is not a known column. " &
-      "Add a {.csv_ignore: [\"" & `column` & "\"].} pragma to the row type to ignore it."
+      "Add a {.csvIgnore: [\"" & `column` & "\"].} pragma to the row type to ignore it."
     )
-  case_stmt.add(new_tree(nnkElse, else_body))
+  caseStmt.add(newTree(nnkElse, elseBody))
   
-  result.add(new_var_stmt(indices, tuple_constr))
-  result.add(new_tree(nnkForStmt, index, column, header, new_stmt_list(case_stmt)))
+  result.add(newVarStmt(indices, tupleConstr))
+  result.add(newTree(nnkForStmt, index, column, header, newStmtList(caseStmt)))
   result.add(indices)
-  result = new_tree(nnkBlockStmt, new_empty_node(), result)
+  result = newTree(nnkBlockStmt, newEmptyNode(), result)
 
-macro parse_row(row, obj, indices: typed): untyped =
-  result = new_stmt_list()
-  let fields = get_type_inst(obj).collect_fields()
+macro parseRow(row, obj, indices: typed): untyped =
+  result = newStmtList()
+  let fields = getTypeInst(obj).collectFields()
   for field in fields:
-    result.add(new_call(field.parser,
-      new_tree(nnkBracketExpr, row,
-        new_tree(nnkDotExpr, indices, ident(field.name))
+    result.add(newCall(field.parser,
+      newTree(nnkBracketExpr, row,
+        newTree(nnkDotExpr, indices, ident(field.name))
       ),
-      new_tree(nnkDotExpr, obj, ident(field.name))
+      newTree(nnkDotExpr, obj, ident(field.name))
     ))
 
-iterator iter_csv*[T](stream: var ReadStream, format = DEFAULT_CSV_FORMAT): T =
+iterator iterCsv*[T](stream: var ReadStream, format = DEFAULT_CSV_FORMAT): T =
   let
-    header = stream.read_csv_row(format)
-    indices = build_cell_indices(header, T)
-  while not stream.at_end():
-    let row = stream.read_csv_row(format)
+    header = stream.readCsvRow(format)
+    indices = buildCellIndices(header, T)
+  while not stream.atEnd():
+    let row = stream.readCsvRow(format)
     if row.len != header.len:
       continue
     var obj = T()
-    parse_row(row, obj, indices)
+    parseRow(row, obj, indices)
     yield obj
 
-iterator iter_csv*[T](path: string, format = DEFAULT_CSV_FORMAT): T =
-  var stream = open_read_stream(path)
+iterator iterCsv*[T](path: string, format = DEFAULT_CSV_FORMAT): T =
+  var stream = openReadStream(path)
   defer: stream.close()
   for row in iter_csv[T](stream, format):
     yield row

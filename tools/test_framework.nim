@@ -16,9 +16,9 @@
 
 import std/[terminal, macros, sets, exitprocs]
 
-var quit_code = QuitSuccess
-add_exit_proc(proc() {.closure.} =
-  quit(quit_code)
+var quitCode = QuitSuccess
+addExitProc(proc() {.closure.} =
+  quit(quitCode)
 )
 
 type TestError = ref object of CatchableError
@@ -32,66 +32,66 @@ template test*(name: string, body: untyped) =
   except TestError as err:
     error = err
 
-  if error.is_nil:
-    stdout.set_foreground_color(fgGreen)
+  if error.isNil:
+    stdout.setForegroundColor(fgGreen)
     stdout.write("[✓] ")
-    stdout.reset_attributes()
+    stdout.resetAttributes()
     stdout.write(name)
     stdout.write("\n")
   else:
-    quit_code = QuitFailure
+    quitCode = QuitFailure
     stdout.write("\n")
-    stdout.set_foreground_color(fgRed)
+    stdout.setForegroundColor(fgRed)
     stdout.write("Test Failed: ")
-    stdout.reset_attributes()
+    stdout.resetAttributes()
     stdout.write(name)
     stdout.write(" (" & $error.line & ", " & $error.column & ")")
     stdout.write("\n")
-    for (var_name, value) in error.env:
-      stdout.set_foreground_color(fgRed)
-      stdout.write(var_name & ": ")
-      stdout.reset_attributes()
+    for (varName, value) in error.env:
+      stdout.setForegroundColor(fgRed)
+      stdout.write(varName & ": ")
+      stdout.resetAttributes()
       stdout.write(value)
       stdout.write("\n")
     stdout.write("\n")
-  stdout.flush_file()
+  stdout.flushFile()
 
 template subtest*(body: untyped) =
   block:
     body
 
-proc collect_env(node: NimNode): HashSet[string] =
+proc collectEnv(node: NimNode): HashSet[string] =
   case node.kind:
     of nnkIdent, nnkSym:
-      result.incl(node.str_val)
+      result.incl(node.strVal)
     of nnkCallKinds, nnkObjConstr:
       for it in 1..<node.len:
-        result = union(result, node[it].collect_env())
+        result = union(result, node[it].collectEnv())
     of nnkDotExpr:
-      result = node[0].collect_env()
+      result = node[0].collectEnv()
     of nnkExprColonExpr:
-      result = node[1].collect_env()
+      result = node[1].collectEnv()
     else:
       for child in node:
-        result = union(result, child.collect_env())
+        result = union(result, child.collectEnv())
 
-proc stringify_env_var[T](x: T): string =
+proc stringifyEnvVar[T](x: T): string =
   when compiles($x):
     result = $x
   else:
     result = "..."
 
 macro check*(cond: untyped): untyped =
-  let cond_str = repr(cond)
-  var env = new_nim_node(nnkBracket)
-  for name in cond.collect_env():
-    env.add(new_tree(nnkTupleConstr, [
-      new_lit(name), new_call(bind_sym("stringify_env_var"), ident(name))
+  let condStr = repr(cond)
+  var env = newNimNode(nnkBracket)
+  for name in cond.collectEnv():
+    env.add(newTree(nnkTupleConstr, [
+      newLit(name), newCall(bindSym("stringifyEnvVar"), ident(name))
     ]))
-  env = new_call(bind_sym("@"), env)
+  env = newCall(bindSym("@"), env)
   let
-    line = cond.line_info_obj.line
-    column = cond.line_info_obj.column
+    line = cond.lineInfoObj.line
+    column = cond.lineInfoObj.column
   result = quote:
     if not `cond`:
-      raise TestError(msg: `cond_str`, env: `env`, line: `line`, column: `column`)
+      raise TestError(msg: `condStr`, env: `env`, line: `line`, column: `column`)

@@ -19,30 +19,30 @@ import wrappers/llvm
 import runtimes/gpu
 import ir, clgen
 
-proc to_llvm(scalar_type: ScalarType): TypeRef =
-  case scalar_type:
+proc toLlvm(scalarType: ScalarType): TypeRef =
+  case scalarType:
     of Scalar32: result = float_type()
     of Scalar64: result = double_type()
 
 type Builtin = object
-  scalar_type: ScalarType
+  scalarType: ScalarType
   # Tensor
   tensor: ValueRef
   shape: ValueRef
   len: ValueRef
-  shape_len: ValueRef
+  shapeLen: ValueRef
   # Debug
-  debug_index: ValueRef
-  debug_scalar: ValueRef
+  debugIndex: ValueRef
+  debugScalar: ValueRef
   # Values
   epoch: ValueRef
   # Threads
-  run_threads: ValueRef
-  join_threads: ValueRef
+  runThreads: ValueRef
+  joinThreads: ValueRef
   # Gpu
-  run_gpu_kernel: ValueRef
-  set_gpu_kernel_index: ValueRef
-  set_gpu_kernel_tensor: ValueRef
+  runGpuKernel: ValueRef
+  setGpuKernelIndex: ValueRef
+  setGpuKernelTensor: ValueRef
   # Intrinsics
   sin: ValueRef
   cos: ValueRef
@@ -51,146 +51,146 @@ type Builtin = object
   sqrt: ValueRef
   pow: ValueRef
 
-proc model_ptr_type(): TypeRef = pointer_type(int8_type(), 0)
-proc void_ptr_type(): TypeRef = pointer_type(int8_type(), 0)
+proc modelPtrType(): TypeRef = pointer_type(int8_type(), 0)
+proc voidPtrType(): TypeRef = pointer_type(int8_type(), 0)
 
-proc tensor_signature(builtin: Builtin): TypeRef =
-  function_type(pointer_type(builtin.scalar_type.to_llvm(), 0), [
-    model_ptr_type(), nim_int_type()
+proc tensorSignature(builtin: Builtin): TypeRef =
+  functionType(pointer_type(builtin.scalarType.toLlvm(), 0), [
+    modelPtrType(), nimIntType()
   ])
 
-proc shape_signature(builtin: Builtin): TypeRef =
-  function_type(nim_int_type(), [
-    model_ptr_type(), nim_int_type(), nim_int_type()
+proc shapeSignature(builtin: Builtin): TypeRef =
+  functionType(nimIntType(), [
+    modelPtrType(), nimIntType(), nimIntType()
   ])
 
-proc len_signature(builtin: Builtin): TypeRef =
-  function_type(nim_int_type(), [model_ptr_type(), nim_int_type()])
+proc lenSignature(builtin: Builtin): TypeRef =
+  functionType(nimIntType(), [modelPtrType(), nimIntType()])
 
-proc shape_len_signature(builtin: Builtin): TypeRef =
-  function_type(nim_int_type(), [model_ptr_type(), nim_int_type()])
+proc shapeLenSignature(builtin: Builtin): TypeRef =
+  functionType(nimIntType(), [modelPtrType(), nimIntType()])
 
-proc debug_index_signature(builtin: Builtin): TypeRef =
-  function_type(void_type(), [model_ptr_type(), nim_int_type()])
+proc debugIndexSignature(builtin: Builtin): TypeRef =
+  functionType(void_type(), [modelPtrType(), nimIntType()])
 
-proc debug_scalar_signature(builtin: Builtin): TypeRef =
-  function_type(void_type(), [model_ptr_type(), builtin.scalar_type.to_llvm()])
+proc debugScalarSignature(builtin: Builtin): TypeRef =
+  functionType(void_type(), [modelPtrType(), builtin.scalarType.toLlvm()])
 
-proc epoch_signature(builtin: Builtin): TypeRef =
-  function_type(nim_int_type(), [model_ptr_type()])
+proc epochSignature(builtin: Builtin): TypeRef =
+  functionType(nimIntType(), [modelPtrType()])
 
-proc task_proc_signature(): TypeRef =
-  function_type(void_type(), [
-    model_ptr_type(), nim_int_type(), nim_int_type(), void_ptr_type()
+proc taskProcSignature(): TypeRef =
+  functionType(void_type(), [
+    modelPtrType(), nimIntType(), nimIntType(), voidPtrType()
   ])
 
-proc run_threads_signature(builtin: Builtin): TypeRef =
-  function_type(void_type(), [
-    model_ptr_type(), nim_int_type(), nim_int_type(), void_ptr_type(),
-    task_proc_signature().pointer_type(0)
+proc runThreadsSignature(builtin: Builtin): TypeRef =
+  functionType(void_type(), [
+    modelPtrType(), nimIntType(), nimIntType(), voidPtrType(),
+    taskProcSignature().pointer_type(0)
   ])
 
-proc join_threads_signature(builtin: Builtin): TypeRef =
-  function_type(void_type(), [model_ptr_type()])
+proc joinThreadsSignature(builtin: Builtin): TypeRef =
+  functionType(void_type(), [modelPtrType()])
 
-proc set_gpu_kernel_index_signature(builtin: Builtin): TypeRef =
-  function_type(void_type(), [
-    model_ptr_type(), nim_int_type(),
-    nim_int_type(), nim_int_type()
+proc setGpuKernelIndexSignature(builtin: Builtin): TypeRef =
+  functionType(void_type(), [
+    modelPtrType(), nimIntType(),
+    nimIntType(), nimIntType()
   ])
 
-proc set_gpu_kernel_tensor_signature(builtin: Builtin): TypeRef =
-  function_type(void_type(), [
-    model_ptr_type(), nim_int_type(),
-    nim_int_type(), nim_int_type()
+proc setGpuKernelTensorSignature(builtin: Builtin): TypeRef =
+  functionType(void_type(), [
+    modelPtrType(), nimIntType(),
+    nimIntType(), nimIntType()
   ])
 
-proc run_gpu_kernel_signature(builtin: Builtin): TypeRef =
-  function_type(void_type(), [
-    model_ptr_type(), nim_int_type(),
-    nim_int_type(),
-    nim_int_type().pointer_type(0),
-    nim_int_type().pointer_type(0)
+proc runGpuKernelSignature(builtin: Builtin): TypeRef =
+  functionType(void_type(), [
+    modelPtrType(), nimIntType(),
+    nimIntType(),
+    nimIntType().pointer_type(0),
+    nimIntType().pointer_type(0)
   ])
 
-proc scalar_unary_intrinsic_signature(builtin: Builtin): TypeRef =
-  function_type(builtin.scalar_type.to_llvm(), [builtin.scalar_type.to_llvm()])
+proc scalarUnaryIntrinsicSignature(builtin: Builtin): TypeRef =
+  functionType(builtin.scalarType.toLlvm(), [builtin.scalarType.toLlvm()])
 
-proc scalar_binary_intrinsic_signature(builtin: Builtin): TypeRef =
-  function_type(builtin.scalar_type.to_llvm(), [
-    builtin.scalar_type.to_llvm(), builtin.scalar_type.to_llvm()
+proc scalarBinaryIntrinsicSignature(builtin: Builtin): TypeRef =
+  functionType(builtin.scalarType.toLlvm(), [
+    builtin.scalarType.toLlvm(), builtin.scalarType.toLlvm()
   ])
 
-proc init_builtin(module: ModuleRef, program: Program): Builtin =
-  result = Builtin(scalar_type: program.scalar_type)
-  result.tensor = module.add_function("tensor", result.tensor_signature())
-  result.shape = module.add_function("shape", result.shape_signature())
-  result.len = module.add_function("len", result.len_signature())
-  result.shape_len = module.add_function("shape_len", result.shape_len_signature())
-  result.debug_index = module.add_function("debug_index", result.debug_index_signature())
-  result.debug_scalar = module.add_function("debug_scalar", result.debug_scalar_signature())
-  result.epoch = module.add_function("epoch", result.epoch_signature())
-  result.run_threads = module.add_function("run_threads", result.run_threads_signature())
-  result.join_threads = module.add_function("join_threads", result.join_threads_signature())
-  result.run_gpu_kernel = module.add_function("run_gpu_kernel", result.run_gpu_kernel_signature())
-  result.set_gpu_kernel_index = module.add_function("set_gpu_kernel_index", result.set_gpu_kernel_index_signature())
-  result.set_gpu_kernel_tensor = module.add_function("set_gpu_kernel_tensor", result.set_gpu_kernel_tensor_signature())
+proc initBuiltin(module: ModuleRef, program: Program): Builtin =
+  result = Builtin(scalarType: program.scalarType)
+  result.tensor = module.add_function("tensor", result.tensorSignature())
+  result.shape = module.add_function("shape", result.shapeSignature())
+  result.len = module.add_function("len", result.lenSignature())
+  result.shapeLen = module.add_function("shapeLen", result.shapeLenSignature())
+  result.debugIndex = module.add_function("debugIndex", result.debugIndexSignature())
+  result.debugScalar = module.add_function("debugScalar", result.debugScalarSignature())
+  result.epoch = module.add_function("epoch", result.epochSignature())
+  result.runThreads = module.add_function("runThreads", result.runThreadsSignature())
+  result.joinThreads = module.add_function("joinThreads", result.joinThreadsSignature())
+  result.runGpuKernel = module.add_function("runGpuKernel", result.runGpuKernelSignature())
+  result.setGpuKernelIndex = module.add_function("setGpuKernelIndex", result.setGpuKernelIndexSignature())
+  result.setGpuKernelTensor = module.add_function("setGpuKernelTensor", result.setGpuKernelTensorSignature())
   
-  let type_postfix = [Scalar32: "f32", Scalar64: "f64"][result.scalar_type]
-  result.sin = module.add_function(cstring("llvm.sin." & type_postfix), result.scalar_unary_intrinsic_signature())
-  result.cos = module.add_function(cstring("llvm.cos." & type_postfix), result.scalar_unary_intrinsic_signature())
-  result.exp = module.add_function(cstring("llvm.exp." & type_postfix), result.scalar_unary_intrinsic_signature())
-  result.ln = module.add_function(cstring("llvm.log." & type_postfix), result.scalar_unary_intrinsic_signature())
-  result.sqrt = module.add_function(cstring("llvm.sqrt." & type_postfix), result.scalar_unary_intrinsic_signature())
-  result.pow = module.add_function(cstring("llvm.pow." & type_postfix), result.scalar_binary_intrinsic_signature())
+  let typePostfix = [Scalar32: "f32", Scalar64: "f64"][result.scalarType]
+  result.sin = module.add_function(cstring("llvm.sin." & typePostfix), result.scalarUnaryIntrinsicSignature())
+  result.cos = module.add_function(cstring("llvm.cos." & typePostfix), result.scalarUnaryIntrinsicSignature())
+  result.exp = module.add_function(cstring("llvm.exp." & typePostfix), result.scalarUnaryIntrinsicSignature())
+  result.ln = module.add_function(cstring("llvm.log." & typePostfix), result.scalarUnaryIntrinsicSignature())
+  result.sqrt = module.add_function(cstring("llvm.sqrt." & typePostfix), result.scalarUnaryIntrinsicSignature())
+  result.pow = module.add_function(cstring("llvm.pow." & typePostfix), result.scalarBinaryIntrinsicSignature())
 
 type Context = ref object
   program: Program
   target: string
   kernel: Kernel
-  kernel_id: KernelId
+  kernelId: KernelId
   module: ModuleRef
   builder: BuilderRef
   fn: ValueRef
   builtin: Builtin
   tensors: seq[ValueRef]
   regs: seq[ValueRef]
-  gpu_sources: seq[GpuKernelSource]
+  gpuSources: seq[GpuKernelSource]
 
 proc `[]`(ctx: Context, reg: RegId): ValueRef = ctx.regs[reg]
 proc `[]=`(ctx: Context, reg: RegId, val: ValueRef) = ctx.regs[reg] = val
 proc `[]`(ctx: Context, tensor: TensorId): ValueRef = ctx.tensors[tensor]
 proc `[]=`(ctx: Context, tensor: TensorId, val: ValueRef) = ctx.tensors[tensor] = val
 
-proc scalar_type(ctx: Context): TypeRef =
-  ctx.program.scalar_type.to_llvm()
+proc scalarType(ctx: Context): TypeRef =
+  ctx.program.scalarType.toLlvm()
 
-proc to_llvm(typ: Type, ctx: Context): TypeRef =
+proc toLlvm(typ: Type, ctx: Context): TypeRef =
   case typ.kind:
-    of TypeIndex: result = nim_int_type()
-    of TypeScalar: result = ctx.scalar_type()
+    of TypeIndex: result = nimIntType()
+    of TypeScalar: result = ctx.scalarType()
     of TypeBoolean: result = int1_type()
-    of TypeArray: result = pointer_type(typ.item.to_llvm(ctx), 0)
+    of TypeArray: result = pointer_type(typ.item.toLlvm(ctx), 0)
 
-proc build_array(ctx: Context, item_type: TypeRef, items: openArray[ValueRef], res: cstring): ValueRef =
-  let current_block = ctx.builder.get_insert_block()
-  ctx.builder.position_builder_at_start(ctx.fn.get_entry_basic_block())
+proc buildArray(ctx: Context, itemType: TypeRef, items: openArray[ValueRef], res: cstring): ValueRef =
+  let currentBlock = ctx.builder.get_insert_block()
+  ctx.builder.positionBuilderAtStart(ctx.fn.get_entry_basic_block())
   result = ctx.builder.build_array_alloca(
-    item_type,
-    const_nim_int(items.len),
+    itemType,
+    constNimInt(items.len),
     res
   )
-  ctx.builder.position_builder_at_end(current_block)
+  ctx.builder.position_builder_at_end(currentBlock)
   for it, item in items:
-    let value_ptr = ctx.builder.build_gep2(
-      item_type,
+    let valuePtr = ctx.builder.buildGep2(
+      itemType,
       result,
-      [const_nim_int(it)],
+      [constNimInt(it)],
       "array_value_ptr"
     )
-    discard ctx.builder.build_store(item, value_ptr)
+    discard ctx.builder.build_store(item, valuePtr)
 
-proc to_llvm(instrs: seq[Instr], ctx: Context) =
+proc toLlvm(instrs: seq[Instr], ctx: Context) =
   let builder = ctx.builder
   for instr in instrs:
     var res = ValueRef(nil)
@@ -203,7 +203,7 @@ proc to_llvm(instrs: seq[Instr], ctx: Context) =
     template unop(op) =
       res = builder.op(ctx[instr.args[0]], cstring($instr.res))
     
-    template generic_op(op_kind, index_op, scalar_op) =
+    template genericOp(opKind, indexOp, scalarOp) =
       if ctx.kernel.regs[instr.args[0]].typ.kind == TypeScalar:
         op_kind(scalar_op)
       else:
@@ -211,14 +211,14 @@ proc to_llvm(instrs: seq[Instr], ctx: Context) =
     
     case instr.kind:
       of InstrIndex:
-        res = const_nim_int(instr.index_lit)
+        res = constNimInt(instr.indexLit)
       of InstrScalar:
-        res = const_real(ctx.scalar_type(), cdouble(instr.scalar_lit))
+        res = const_real(ctx.scalarType(), cdouble(instr.scalarLit))
       of InstrBoolean:
-        res = const_int(int1_type(), culonglong(ord(instr.boolean_lit)), 0)
-      of InstrAdd: generic_op(binop, build_nsw_add, build_fadd)
-      of InstrSub: generic_op(binop, build_nsw_sub, build_fsub)
-      of InstrMul: generic_op(binop, build_nsw_mul, build_fmul)
+        res = const_int(int1_type(), culonglong(ord(instr.booleanLit)), 0)
+      of InstrAdd: genericOp(binop, build_nsw_add, build_fadd)
+      of InstrSub: genericOp(binop, build_nsw_sub, build_fsub)
+      of InstrMul: genericOp(binop, build_nsw_mul, build_fmul)
       of InstrDiv: binop(build_fdiv)
       of InstrIndexDiv: binop(build_sdiv)
       of InstrMod: binop(build_srem)
@@ -226,7 +226,7 @@ proc to_llvm(instrs: seq[Instr], ctx: Context) =
         res = builder.build_srem(ctx[instr.args[0]], ctx[instr.args[1]], cstring($instr.res & "_mod"))
         res = builder.build_add(res, ctx[instr.args[1]], cstring($instr.res & "_offset"))
         res = builder.build_srem(res, ctx[instr.args[1]], cstring($instr.res))
-      of InstrNegate: generic_op(unop, build_negate, build_fnegate)
+      of InstrNegate: genericOp(unop, buildNegate, buildFnegate)
       of InstrSelect:
         res = builder.build_select(
           ctx[instr.args[0]],
@@ -242,51 +242,51 @@ proc to_llvm(instrs: seq[Instr], ctx: Context) =
           of InstrLn: ctx.builtin.ln
           of InstrSqrt: ctx.builtin.sqrt
           else: nil
-        res = builder.build_call2(
-          ctx.builtin.scalar_unary_intrinsic_signature(),
+        res = builder.buildCall2(
+          ctx.builtin.scalarUnaryIntrinsicSignature(),
           fn, [ctx[instr.args[0]]], cstring($instr.res)
         )
       of InstrPow:
         let fn = case instr.kind:
           of InstrPow: ctx.builtin.pow
           else: nil
-        res = builder.build_call2(
-          ctx.builtin.scalar_binary_intrinsic_signature(),
+        res = builder.buildCall2(
+          ctx.builtin.scalarBinaryIntrinsicSignature(),
           fn, [ctx[instr.args[0]], ctx[instr.args[1]]],
           cstring($instr.res)
         )
-      of InstrEq: generic_op(binop, build_icmp_eq, build_fcmp_oeq)
-      of InstrLt: generic_op(binop, build_icmp_slt, build_fcmp_olt)
-      of InstrLe: generic_op(binop, build_icmp_sle, build_fcmp_ole)
+      of InstrEq: genericOp(binop, buildIcmpEq, buildFcmpOeq)
+      of InstrLt: genericOp(binop, buildIcmpSlt, buildFcmpOlt)
+      of InstrLe: genericOp(binop, buildIcmpSle, buildFcmpOle)
       of InstrAnd: binop(build_and)
       of InstrOr: binop(build_or)
       of InstrToScalar, InstrToIndex:
         let
-          from_typ = ctx.kernel.regs[instr.args[0]].typ
-          to_typ = ctx.kernel.regs[instr.res].typ
+          fromTyp = ctx.kernel.regs[instr.args[0]].typ
+          toTyp = ctx.kernel.regs[instr.res].typ
         
         template convert(name: untyped) =
-          res = builder.name(ctx[instr.args[0]], to_typ.to_llvm(ctx), cstring($instr.res))
+          res = builder.name(ctx[instr.args[0]], toTyp.toLlvm(ctx), cstring($instr.res))
         
-        if from_typ.kind == TypeIndex and to_typ.kind == TypeScalar:
+        if fromTyp.kind == TypeIndex and toTyp.kind == TypeScalar:
           convert(build_si_to_fp)
-        elif from_typ.kind == TypeScalar and to_typ.kind == TypeIndex:
+        elif fromTyp.kind == TypeScalar and toTyp.kind == TypeIndex:
           convert(build_fp_to_si)
         else:
-          raise GeneratorError(msg: "Unable to convert " & $from_typ & " to " & $to_typ)
+          raise GeneratorError(msg: "Unable to convert " & $fromTyp & " to " & $toTyp)
       of InstrRead, InstrWrite, InstrOverwrite:
         let
           align = cuint(4) # TODO
-          value_ptr = builder.build_gep2(
-            ctx.scalar_type(), ctx[instr.tensor],
+          valuePtr = builder.buildGep2(
+            ctx.scalarType(), ctx[instr.tensor],
             [ctx[instr.args[0]]], "value_ptr"
           )
-        value_ptr.set_is_in_bounds(1)
+        valuePtr.set_is_in_bounds(1)
         
         case instr.kind:
           of InstrWrite, InstrRead:
             let value = builder.build_load2(
-              ctx.scalar_type(), value_ptr, cstring($instr.res)
+              ctx.scalarType(), valuePtr, cstring($instr.res)
             )
             value.set_alignment(align)
             case instr.kind:
@@ -294,187 +294,187 @@ proc to_llvm(instrs: seq[Instr], ctx: Context) =
               of InstrWrite:
                 builder.build_store(builder.build_fadd(
                   value, ctx[instr.args[1]], "new_value"
-                ), value_ptr).set_alignment(align)
+                ), valuePtr).set_alignment(align)
               else: discard
           of InstrOverwrite:
-            builder.build_store(ctx[instr.args[1]], value_ptr).set_alignment(align)
+            builder.build_store(ctx[instr.args[1]], valuePtr).set_alignment(align)
           else: discard
       of InstrLen:
-        res = builder.build_call2(ctx.builtin.len_signature(), ctx.builtin.len, [
+        res = builder.buildCall2(ctx.builtin.lenSignature(), ctx.builtin.len, [
           ctx.fn.get_param(0),
-          const_nim_int(int(instr.tensor))
+          constNimInt(int(instr.tensor))
         ], cstring($instr.res))
       of InstrShape:
-        res = builder.build_call2(ctx.builtin.shape_signature(), ctx.builtin.shape, [
+        res = builder.buildCall2(ctx.builtin.shapeSignature(), ctx.builtin.shape, [
           ctx.fn.get_param(0),
-          const_nim_int(int(instr.tensor)),
-          const_nim_int(instr.dim)
+          constNimInt(int(instr.tensor)),
+          constNimInt(instr.dim)
         ], cstring($instr.res))
       of InstrShapeLen:
-        res = builder.build_call2(ctx.builtin.shape_len_signature(), ctx.builtin.shape_len, [
+        res = builder.buildCall2(ctx.builtin.shapeLenSignature(), ctx.builtin.shapeLen, [
           ctx.fn.get_param(0),
-          const_nim_int(int(instr.tensor))
+          constNimInt(int(instr.tensor))
         ], cstring($instr.res))
       of InstrEpoch:
-        res = builder.build_call2(ctx.builtin.epoch_signature(),
+        res = builder.buildCall2(ctx.builtin.epochSignature(),
           ctx.builtin.epoch, [ctx.fn.get_param(0)], cstring($instr.res)
         )
       of InstrLoop:
         let
-          header_block = builder.get_insert_block()
-          cond_block = ctx.fn.append_basic_block("cond")
-          body_block = ctx.fn.append_basic_block("body")
-          end_block = ctx.fn.append_basic_block("end")
-          incr_block = ctx.fn.append_basic_block("incr")
-        discard builder.build_br(cond_block)
-        builder.position_builder_at_end(cond_block)
-        ctx[instr.loop_iter] = builder.build_phi(
-          ctx.kernel.regs[instr.loop_iter].typ.to_llvm(ctx),
-          cstring("iter_" & $instr.loop_iter)
+          headerBlock = builder.get_insert_block()
+          condBlock = ctx.fn.append_basic_block("cond")
+          bodyBlock = ctx.fn.append_basic_block("body")
+          endBlock = ctx.fn.append_basic_block("end")
+          incrBlock = ctx.fn.append_basic_block("incr")
+        discard builder.build_br(condBlock)
+        builder.position_builder_at_end(condBlock)
+        ctx[instr.loopIter] = builder.build_phi(
+          ctx.kernel.regs[instr.loopIter].typ.toLlvm(ctx),
+          cstring("iter_" & $instr.loopIter)
         )
         let
-          cond = builder.build_icmp_eq(
-            ctx[instr.loop_iter],
+          cond = builder.buildIcmpEq(
+            ctx[instr.loopIter],
             ctx[instr.args[1]],
             "exitcond"
           )
-        discard builder.build_cond_br(cond, end_block, body_block)
-        builder.position_builder_at_end(body_block)
-        instr.body.to_llvm(ctx)
-        discard builder.build_br(incr_block)
+        discard builder.build_cond_br(cond, endBlock, bodyBlock)
+        builder.position_builder_at_end(bodyBlock)
+        instr.body.toLlvm(ctx)
+        discard builder.build_br(incrBlock)
         
-        if instr.loop_step <= 0:
+        if instr.loopStep <= 0:
           raise GeneratorError(msg: "Loop step size must be a positive integer.")
         
-        builder.position_builder_at_end(incr_block)
-        let new_iter = builder.build_add(
-          ctx[instr.loop_iter],
-          const_nim_int(instr.loop_step),
+        builder.position_builder_at_end(incrBlock)
+        let newIter = builder.build_add(
+          ctx[instr.loopIter],
+          constNimInt(instr.loopStep),
           "incr_iter"
         )
-        discard builder.build_br(cond_block)
+        discard builder.build_br(condBlock)
         
-        ctx[instr.loop_iter].add_incoming(
-          [ctx[instr.args[0]], new_iter],
-          [header_block, incr_block]
+        ctx[instr.loopIter].addIncoming(
+          [ctx[instr.args[0]], newIter],
+          [headerBlock, incrBlock]
         )
-        builder.position_builder_at_end(end_block)
+        builder.position_builder_at_end(endBlock)
       of InstrThreads:
-        var closure_fields: seq[TypeRef] = @[]
-        for reg in instr.threads_closure.regs:
-          closure_fields.add(ctx.kernel.regs[reg].typ.to_llvm(ctx))
-        for tensor in instr.threads_closure.tensors:
-          closure_fields.add(pointer_type(ctx.scalar_type(), 0))
-        let closure_type = struct_type(closure_fields)
+        var closureFields: seq[TypeRef] = @[]
+        for reg in instr.threadsClosure.regs:
+          closureFields.add(ctx.kernel.regs[reg].typ.toLlvm(ctx))
+        for tensor in instr.threadsClosure.tensors:
+          closureFields.add(pointer_type(ctx.scalarType(), 0))
+        let closureType = structType(closureFields)
         
         let
-          current_block = builder.get_insert_block()
-          sig = task_proc_signature()
-          task = ctx.module.add_function(cstring($ctx.kernel_id & "_task"), sig)
+          currentBlock = builder.get_insert_block()
+          sig = taskProcSignature()
+          task = ctx.module.add_function(cstring($ctx.kernelId & "_task"), sig)
           entry = task.append_basic_block(cstring("entry"))
         
-        let task_ctx = Context(
+        let taskCtx = Context(
           program: ctx.program,
           target: ctx.target,
           kernel: ctx.kernel,
-          kernel_id: ctx.kernel_id,
+          kernel_id: ctx.kernelId,
           module: ctx.module,
           builder: ctx.builder,
           fn: task,
           builtin: ctx.builtin,
-          regs: new_seq[ValueRef](ctx.kernel.regs.len),
-          tensors: new_seq[ValueRef](ctx.program.tensors.len)
+          regs: newSeq[ValueRef](ctx.kernel.regs.len),
+          tensors: newSeq[ValueRef](ctx.program.tensors.len)
         )
-        task_ctx[instr.threads_begin] = task.get_param(1)
-        task_ctx[instr.threads_end] = task.get_param(2)
+        taskCtx[instr.threadsBegin] = task.get_param(1)
+        taskCtx[instr.threadsEnd] = task.get_param(2)
         
         var offset = 0
-        builder.position_builder_at_end(current_block)
-        let closure = builder.build_alloca(closure_type, "closure")
+        builder.position_builder_at_end(currentBlock)
+        let closure = builder.build_alloca(closureType, "closure")
         builder.position_builder_at_end(entry)
-        let task_closure = builder.build_bit_cast(task.get_param(3), closure_type.pointer_type(0), "closure")
+        let taskClosure = builder.build_bit_cast(task.get_param(3), closureType.pointer_type(0), "closure")
         
-        template make_closure(ids) =
+        template makeClosure(ids) =
           for id in ids:
             block:
-              builder.position_builder_at_end(current_block)
-              let field_ptr = builder.build_gep2(closure_type, closure, [
-                const_int32(0), const_int32(int32(offset))
+              builder.position_builder_at_end(currentBlock)
+              let fieldPtr = builder.buildGep2(closureType, closure, [
+                constInt32(0), constInt32(int32(offset))
               ], "field_ptr")
               discard builder.build_store(ctx[id], field_ptr)
             block:
               builder.position_builder_at_end(entry)
-              let field_ptr = builder.build_gep2(closure_type, task_closure, [
-                const_int32(0), const_int32(int32(offset))
+              let fieldPtr = builder.buildGep2(closureType, taskClosure, [
+                constInt32(0), constInt32(int32(offset))
               ], "field_ptr")
-              task_ctx[id] = builder.build_load2(closure_fields[offset], field_ptr, cstring($id))
+              taskCtx[id] = builder.build_load2(closureFields[offset], field_ptr, cstring($id))
             offset += 1
         
-        make_closure(instr.threads_closure.regs)
-        make_closure(instr.threads_closure.tensors)
+        makeClosure(instr.threadsClosure.regs)
+        makeClosure(instr.threadsClosure.tensors)
         
-        builder.position_builder_at_end(current_block)
-        discard builder.build_call2(ctx.builtin.run_threads_signature(), ctx.builtin.run_threads, [
+        builder.position_builder_at_end(currentBlock)
+        discard builder.buildCall2(ctx.builtin.runThreadsSignature(), ctx.builtin.runThreads, [
           ctx.fn.get_param(0), ctx[instr.args[0]], ctx[instr.args[1]],
-          builder.build_bit_cast(closure, void_ptr_type(), "data"),
+          builder.build_bit_cast(closure, voidPtrType(), "data"),
           task
         ], cstring(""))
         
         builder.position_builder_at_end(entry)
-        instr.body.to_llvm(task_ctx)
+        instr.body.toLlvm(taskCtx)
         discard builder.build_ret()
         
-        builder.position_builder_at_end(current_block)
-        discard builder.build_call2(
-          ctx.builtin.join_threads_signature(),
-          ctx.builtin.join_threads,
+        builder.position_builder_at_end(currentBlock)
+        discard builder.buildCall2(
+          ctx.builtin.joinThreadsSignature(),
+          ctx.builtin.joinThreads,
           [ctx.fn.get_param(0)],
           cstring("")
         )
       of InstrArray:
         let
-          array_type = ctx.kernel.regs[instr.res].typ
-          item_type = array_type.item.to_llvm(ctx)
-        var items = new_seq[ValueRef](instr.args.len)
+          arrayType = ctx.kernel.regs[instr.res].typ
+          itemType = arrayType.item.toLlvm(ctx)
+        var items = newSeq[ValueRef](instr.args.len)
         for it, arg in instr.args:
           items[it] = ctx[arg]
-        res = ctx.build_array(item_type, items, cstring($instr.res))
+        res = ctx.buildArray(itemType, items, cstring($instr.res))
       of InstrArrayRead:
         let
-          array_type = ctx.kernel.regs[instr.args[0]].typ
-          item_type = array_type.item.to_llvm(ctx)
-          value_ptr = builder.build_gep2(
-            item_type,
+          arrayType = ctx.kernel.regs[instr.args[0]].typ
+          itemType = arrayType.item.toLlvm(ctx)
+          valuePtr = builder.buildGep2(
+            itemType,
             ctx[instr.args[0]],
             [ctx[instr.args[1]]],
             "array_value_ptr"
           )
-        res = builder.build_load2(item_type, value_ptr, cstring($instr.res))
+        res = builder.build_load2(itemType, valuePtr, cstring($instr.res))
       of InstrArrayLen:
-        res = const_nim_int(ctx.kernel.regs[instr.args[0]].typ.len)
+        res = constNimInt(ctx.kernel.regs[instr.args[0]].typ.len)
       of InstrGpu:
         when defined(opencl):
           let source = instr.body.to_cl(instr.gpu_closure, instr.gpu_indices, ctx.kernel, ctx.program)
           ctx.gpu_sources.add(GpuKernelSource(name: "cl_kernel", source: source))
-        let gpu_kernel_id = ctx.gpu_sources.len
+        let gpuKernelId = ctx.gpuSources.len
         
         var arg = 0
-        for tensor in instr.gpu_closure.tensors:
-          discard builder.build_call2(ctx.builtin.set_gpu_kernel_tensor_signature(), ctx.builtin.set_gpu_kernel_tensor, [
+        for tensor in instr.gpuClosure.tensors:
+          discard builder.buildCall2(ctx.builtin.setGpuKernelTensorSignature(), ctx.builtin.setGpuKernelTensor, [
             ctx.fn.get_param(0),
-            const_nim_int(gpu_kernel_id),
-            const_nim_int(arg),
-            const_nim_int(int(tensor))
+            constNimInt(gpuKernelId),
+            constNimInt(arg),
+            constNimInt(int(tensor))
           ], cstring(""))
           arg += 1
-        for reg in instr.gpu_closure.regs:
+        for reg in instr.gpuClosure.regs:
           let typ = ctx.kernel.regs[reg].typ
           case typ.kind:
             of TypeIndex:
-              discard builder.build_call2(ctx.builtin.set_gpu_kernel_index_signature(), ctx.builtin.set_gpu_kernel_index, [
+              discard builder.buildCall2(ctx.builtin.setGpuKernelIndexSignature(), ctx.builtin.setGpuKernelIndex, [
                 ctx.fn.get_param(0),
-                const_nim_int(gpu_kernel_id),
-                const_nim_int(arg),
+                constNimInt(gpuKernelId),
+                constNimInt(arg),
                 ctx[reg]
               ], cstring(""))
             else:
@@ -482,41 +482,41 @@ proc to_llvm(instrs: seq[Instr], ctx: Context) =
           arg += 1
         
         var
-          global_size: seq[ValueRef] = @[]
-          local_size: seq[ValueRef] = @[]
-        for it, index in instr.gpu_indices:
-          global_size.add(ctx[instr.args[2 * it + 1]])
-          local_size.add(const_nim_int(index.size))
+          globalSize: seq[ValueRef] = @[]
+          localSize: seq[ValueRef] = @[]
+        for it, index in instr.gpuIndices:
+          globalSize.add(ctx[instr.args[2 * it + 1]])
+          localSize.add(constNimInt(index.size))
         
         let
-          global_size_array = ctx.build_array(nim_int_type(), global_size, "global_size")
-          local_size_array = ctx.build_array(nim_int_type(), local_size, "local_size")
-        discard builder.build_call2(ctx.builtin.run_gpu_kernel_signature(), ctx.builtin.run_gpu_kernel, [
+          globalSizeArray = ctx.buildArray(nimIntType(), globalSize, "global_size")
+          localSizeArray = ctx.buildArray(nimIntType(), localSize, "local_size")
+        discard builder.buildCall2(ctx.builtin.runGpuKernelSignature(), ctx.builtin.runGpuKernel, [
           ctx.fn.get_param(0),
-          const_nim_int(gpu_kernel_id),
-          const_nim_int(instr.args.len div 2),
-          global_size_array,
-          local_size_array
+          constNimInt(gpuKernelId),
+          constNimInt(instr.args.len div 2),
+          globalSizeArray,
+          localSizeArray
         ], cstring(""))
       else:
         raise GeneratorError(msg: "Unable to generate LLVM IR for " & $instr.kind)
     
-    if not res.is_nil:
+    if not res.isNil:
       assert instr.res != RegId(0)
       ctx[instr.res] = res
 
-proc to_llvm(kernel: Kernel, kernel_id: KernelId, ctx: Context) =
+proc toLlvm(kernel: Kernel, kernelId: KernelId, ctx: Context) =
   let
     builder = ctx.builder
-    kernel_block = ctx.fn.append_basic_block(cstring($kernel_id))
-  discard builder.build_br(kernel_block)
-  builder.position_builder_at_end(kernel_block)
+    kernelBlock = ctx.fn.append_basic_block(cstring($kernelId))
+  discard builder.build_br(kernelBlock)
+  builder.position_builder_at_end(kernelBlock)
   
-  ctx.regs = new_seq[ValueRef](kernel.regs.len)
-  kernel.setup.to_llvm(ctx)
+  ctx.regs = newSeq[ValueRef](kernel.regs.len)
+  kernel.setup.toLlvm(ctx)
 
-proc to_llvm*(program: Program): (ModuleRef, seq[GpuKernelSource]) =
-  program.assert_gen("llvm", requires={
+proc toLlvm*(program: Program): (ModuleRef, seq[GpuKernelSource]) =
+  program.assertGen("llvm", requires={
     StageTyped, StageGenerated, StageTensors, StageShapes,
     StageLoops, StageTensorInstrs, StageSortedShapes,
     StageConditions
@@ -524,16 +524,16 @@ proc to_llvm*(program: Program): (ModuleRef, seq[GpuKernelSource]) =
 
   let
     module = module_create_with_name("module")
-    builtin = init_builtin(module, program)
-  var gpu_sources: seq[GpuKernelSource] = @[]
+    builtin = initBuiltin(module, program)
+  var gpuSources: seq[GpuKernelSource] = @[]
   for name, target in program.targets:
     let
-      sig = function_type(void_type(), [model_ptr_type()])
+      sig = functionType(void_type(), [modelPtrType()])
       fn = module.add_function(cstring("target_" & name), sig)
       entry = fn.append_basic_block("entry")
       builder = create_builder()
     
-    builder.enable_fast_math()
+    builder.enableFastMath()
     
     builder.position_builder_at_end(entry)
     var ctx = Context(
@@ -543,51 +543,51 @@ proc to_llvm*(program: Program): (ModuleRef, seq[GpuKernelSource]) =
       fn: fn,
       builtin: builtin,
       target: name,
-      tensors: new_seq[ValueRef](program.tensors.len)
+      tensors: newSeq[ValueRef](program.tensors.len)
     )
-    if target.compile_target in {CompileCpu, CompileThreads}:
-      for tensor_id in target.tensors:
-        ctx[tensor_id] = builder.build_call2(
-          ctx.builtin.tensor_signature(),
+    if target.compileTarget in {CompileCpu, CompileThreads}:
+      for tensorId in target.tensors:
+        ctx[tensorId] = builder.buildCall2(
+          ctx.builtin.tensorSignature(),
           ctx.builtin.tensor,
-          [ctx.fn.get_param(0), const_nim_int(int(tensor_id))],
-          cstring($tensor_id)
+          [ctx.fn.get_param(0), constNimInt(int(tensorId))],
+          cstring($tensorId)
         )
     for it, kernel in target.kernels:
       ctx.kernel = kernel
-      ctx.kernel_id = KernelId(it + 1)
-      kernel.to_llvm(KernelId(it + 1), ctx)
+      ctx.kernelId = KernelId(it + 1)
+      kernel.toLlvm(KernelId(it + 1), ctx)
     discard builder.build_ret()
     dispose_builder(builder)
-    gpu_sources.add(ctx.gpu_sources)
-  result = (module, gpu_sources)
+    gpuSources.add(ctx.gpuSources)
+  result = (module, gpuSources)
 
 type
   JitBuiltin* = object
     tensor*: pointer
     shape*: pointer
     len*: pointer
-    shape_len*: pointer
-    debug_index*: pointer
-    debug_scalar*: pointer
+    shapeLen*: pointer
+    debugIndex*: pointer
+    debugScalar*: pointer
     epoch*: pointer
-    run_threads*: pointer
-    join_threads*: pointer
-    run_gpu_kernel*: pointer
-    set_gpu_kernel_index*: pointer
-    set_gpu_kernel_tensor*: pointer
+    runThreads*: pointer
+    joinThreads*: pointer
+    runGpuKernel*: pointer
+    setGpuKernelIndex*: pointer
+    setGpuKernelTensor*: pointer
   
   Jit* = ref object
     module: ModuleRef
     engine: ExecutionEngineRef
     builtin: JitBuiltin
-    gpu_context: GpuContext
+    gpuContext: GpuContext
 
 proc finalize*(jit: Jit) =
-  if not jit.engine.is_nil:
+  if not jit.engine.isNil:
     dispose_execution_engine(jit.engine)
 
-proc new_jit*(module: ModuleRef, builtin: JitBuiltin): Jit =
+proc newJit*(module: ModuleRef, builtin: JitBuiltin): Jit =
   new(result, finalizer=finalize)
   result.module = module
   result.builtin = builtin
@@ -610,19 +610,19 @@ proc new_jit*(module: ModuleRef, builtin: JitBuiltin): Jit =
   
   var err: cstring
   defer:
-    if not err.is_nil:
+    if not err.isNil:
       dispose_message(err)
   
   let 
     triple = get_default_target_triple()
-    target_features = get_host_cpu_features()
-    target_cpu = get_host_cpu_name()
+    targetFeatures = get_host_cpu_features()
+    targetCpu = get_host_cpu_name()
   module.set_target(triple)
   var target: TargetRef = nil
   if get_target_from_triple(triple, target.addr, err.addr) != 0:
     raise JitError(msg: $err)
   let machine = create_target_machine(
-    target, triple, target_cpu, target_features,
+    target, triple, targetCpu, targetFeatures,
     OptAggressive, RelocDefault, CodeModelJitDefault
   )
   module.set_module_data_layout(machine.create_target_data_layout())
@@ -635,10 +635,10 @@ proc new_jit*(module: ModuleRef, builtin: JitBuiltin): Jit =
   
   let
     opts = create_pass_builder_options()
-    pass_err = module.run_passes("default<O3>", machine, opts)
-  if not pass_err.is_nil:
+    passErr = module.run_passes("default<O3>", machine, opts)
+  if not passErr.isNil:
     let
-      msg = pass_err.get_error_message()
+      msg = passErr.get_error_message()
       str = $msg
     dispose_error_message(msg)
     raise JitError(msg: str)
@@ -647,15 +647,15 @@ proc new_jit*(module: ModuleRef, builtin: JitBuiltin): Jit =
   if create_jit_compiler_for_module(result.engine.addr, module, 3, err.addr) != 0:
     raise JitError(msg: $err)
   
-  for name, value in builtin.field_pairs:
-    if value.is_nil:
+  for name, value in builtin.fieldPairs:
+    if value.isNil:
       raise JitError(msg: "Builtin " & name & " is nil")
     let fn = result.module.get_named_function(cstring(name))
-    if not fn.is_nil:
+    if not fn.isNil:
       result.engine.add_global_mapping(fn, value)
 
-proc get_proc*[T: proc](jit: Jit, name: string): T =
+proc getProc*[T: proc](jit: Jit, name: string): T =
   result = cast[T](get_function_address(jit.engine, cstring(name)))
 
-proc save_bitcode*(jit: Jit, path: string) =
-  jit.module.save_bitcode(path)
+proc saveBitcode*(jit: Jit, path: string) =
+  jit.module.saveBitcode(path)

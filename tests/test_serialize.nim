@@ -19,38 +19,38 @@ import exprgrad, exprgrad/ir
 import exprgrad/io/[serialize, faststreams]
 import ../tools/test_framework
 
-proc check_serialize[T](value: T, path: string = "data.bin") =
+proc checkSerialize[T](value: T, path: string = "data.bin") =
   value.save(path)
   var
-    stream = open_read_stream(path)
+    stream = openReadStream(path)
     loaded: T
   defer: stream.close()
   stream.load(loaded)
   check loaded == value
 
 test "scalar":
-  check_serialize(true)
-  check_serialize('a')
-  check_serialize(1)
-  check_serialize(-100)
-  check_serialize(3.14)
+  checkSerialize(true)
+  checkSerialize('a')
+  checkSerialize(1)
+  checkSerialize(-100)
+  checkSerialize(3.14)
 
 test "composite":
-  check_serialize("Hello, world!")
-  check_serialize(@[1, 2, 3])
-  check_serialize(@[new_seq[int](), @[0], @[1, 2], @[3, 4, 5]])
-  check_serialize({1'u8, 2'u8, 3'u8})
-  check_serialize(to_hash_set([1, 2, 3]))
-  check_serialize(to_table({"a": 1, "b": 2}))
-  check_serialize(new_seq[int](1024))
+  checkSerialize("Hello, world!")
+  checkSerialize(@[1, 2, 3])
+  checkSerialize(@[newSeq[int](), @[0], @[1, 2], @[3, 4, 5]])
+  checkSerialize({1'u8, 2'u8, 3'u8})
+  checkSerialize(toHashSet([1, 2, 3]))
+  checkSerialize(toTable({"a": 1, "b": 2}))
+  checkSerialize(newSeq[int](1024))
 
 test "tensor":
-  check_serialize(new_tensor([3, 2], @[float32 1, 2, 3, 4, 5, 6]))
-  check_serialize(new_tensor([1, 3, 2], @[int 1, 2, 3, 4, 5, 6]))
+  checkSerialize(newTensor([3, 2], @[float32 1, 2, 3, 4, 5, 6]))
+  checkSerialize(newTensor([1, 3, 2], @[int 1, 2, 3, 4, 5, 6]))
 
 test "ir":
-  check_serialize(TensorId(10))
-  check_serialize(Instr(kind: InstrAdd, args: @[RegId(0), RegId(1)], res: RegId(3)))
-  check_serialize(Instr(kind: InstrLen, tensor: TensorId(2), res: RegId(3)))
-  check_serialize(Instr(kind: InstrIndex, index_lit: 10, res: RegId(3)))
+  checkSerialize(TensorId(10))
+  checkSerialize(Instr(kind: InstrAdd, args: @[RegId(0), RegId(1)], res: RegId(3)))
+  checkSerialize(Instr(kind: InstrLen, tensor: TensorId(2), res: RegId(3)))
+  checkSerialize(Instr(kind: InstrIndex, indexLit: 10, res: RegId(3)))
 

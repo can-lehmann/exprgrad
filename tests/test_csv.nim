@@ -24,8 +24,8 @@ test "base":
     number*: int
   
   let data = "name;number\nTest;1\n\n\n\"Hello, world\";123\n\";\";\"42\""
-  var stream = init_read_stream(data)
-  check to_seq(iter_csv[Row](stream)) == @[
+  var stream = initReadStream(data)
+  check toSeq(iterCsv[Row](stream)) == @[
     Row(name: "Test", number: 1),
     Row(name: "Hello, world", number: 123),
     Row(name: ";", number: 42)
@@ -33,41 +33,41 @@ test "base":
 
 test "named_columns":
   type Row = object
-    name* {.csv_column: "a".}: string
-    number {.csv_column: "b".}: int
+    name* {.csvColumn: "a".}: string
+    number {.csvColumn: "b".}: int
   
   let data = "a;b\nTest;1\n\n\n\"Hello, world\";123\n\";\";\"42\""
-  var stream = init_read_stream(data)
-  check to_seq(iter_csv[Row](stream)) == @[
+  var stream = initReadStream(data)
+  check toSeq(iterCsv[Row](stream)) == @[
     Row(name: "Test", number: 1),
     Row(name: "Hello, world", number: 123),
     Row(name: ";", number: 42)
   ]
 
 test "ignore_columns":
-  type Row {.csv_ignore: ["a"].} = object
-    number {.csv_column: "b".}: int
+  type Row {.csvIgnore: ["a"].} = object
+    number {.csvColumn: "b".}: int
   
   let data = "a;b\nTest;1\n\n\n\"Hello, world\";123\n\";\";\"42\""
-  var stream = init_read_stream(data)
-  check to_seq(iter_csv[Row](stream)) == @[
+  var stream = initReadStream(data)
+  check toSeq(iterCsv[Row](stream)) == @[
     Row(number: 1),
     Row(number: 123),
     Row(number: 42)
   ]
 
 test "custom_parser":
-  proc parse_name(str: string, dest: var int) =
+  proc parseName(str: string, dest: var int) =
     dest = len(str)
   
   type Row = object
-    name_len {.csv_parser: parse_name, csv_column: "name".}: int
+    nameLen {.csvParser: parseName, csvColumn: "name".}: int
     number*: int
   
   let data = "name;number\nTest;1\n\n\n\"Hello, world\";123\n\";\";\"42\"\n"
-  var stream = init_read_stream(data)
-  check to_seq(iter_csv[Row](stream)) == @[
-    Row(name_len: len("Test"), number: 1),
-    Row(name_len: len("Hello, world"), number: 123),
-    Row(name_len: len(";"), number: 42)
+  var stream = initReadStream(data)
+  check toSeq(iterCsv[Row](stream)) == @[
+    Row(nameLen: len("Test"), number: 1),
+    Row(nameLen: len("Hello, world"), number: 123),
+    Row(nameLen: len(";"), number: 42)
   ]

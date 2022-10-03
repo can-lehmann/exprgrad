@@ -16,17 +16,17 @@
 
 import ../parser, ../dsl
 
-proc dense*(values: Fun, inp, outp: int, has_bias: bool = true): Fun {.layer.} =
+proc dense*(values: Fun, inp, outp: int, hasBias: bool = true): Fun {.layer.} =
   let weights = param([inp, outp])
   result[y, x] ++= values[y, it] * weights[it, x] | (x, y, it)
-  if has_bias:
+  if hasBias:
     let bias = param([outp])
     result[y, x] ++= bias[x] | (y, x)
 
 proc relu*(inp: Fun): Fun {.layer.} =
   result{it} ++= select(inp{it} >= 0.0, inp{it}, 0.0) | it
 
-proc leaky_relu*(inp: Fun, leak: float64 = 0.01): Fun {.layer.} =
+proc leakyRelu*(inp: Fun, leak: float64 = 0.01): Fun {.layer.} =
   result{it} ++= select(inp{it} >= 0.0, 1.0, leak) * inp{it} | it
 
 proc sigmoid*(inp: Fun): Fun {.layer.} =
@@ -62,7 +62,7 @@ proc maxpool2*(images: Fun): Fun {.layer.} =
     images[image, y * 2, x * 2 + 1, chan],
     images[image, y * 2 + 1, x * 2 + 1, chan]
   ) | (image, y, x, chan) do:
-    custom_grad:
+    customGrad:
       grad(images)[image, y, x, chan] ++= select(
         images[image, y, x, chan] == result[image, y div 2, x div 2, chan],
         grad(result)[image, y div 2, x div 2, chan],
@@ -80,7 +80,7 @@ proc avgpool2*(images: Fun): Fun {.layer.} =
 
 proc upsample2*(images: Fun): Fun {.layer.} =
   result[image, y, x, chan] ++= images[image, x div 2, y div 2, chan] | (image, y, x, chan)
-  result.with_shape([
+  result.withShape([
     images.shape[0],
     images.shape[1] * 2,
     images.shape[2] * 2,
@@ -97,4 +97,4 @@ proc dropout*(inp: Fun, prob: float64): Fun {.layer.} =
   let rand = rand(inp, 0.0..1.0)
   rand.name = "dropout.rand"
   result{it} ++= select(prob <= rand{it}, inp{it} / (1.0 - prob), 0.0) | it
-  result.copy_shape(inp)
+  result.copyShape(inp)

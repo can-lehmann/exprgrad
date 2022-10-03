@@ -29,7 +29,7 @@ proc rgb*(r, g, b: uint8): Color = Color(r: r, g: g, b: b, a: 255)
 proc grey*(value: uint8): Color = Color(r: value, g: value, b: value, a: 255)
 {.pop.}
 
-proc to_hex*(color: Color): string =
+proc toHex*(color: Color): string =
   const DIGITS = "0123456789abcdef"
   template component(value: uint8): string =
     DIGITS[int(value shr 4) and 0xf] & DIGITS[int(value) and 0xf]
@@ -54,7 +54,7 @@ type
   ShapeStyle* = object
     stroke*: Color
     fill*: Color
-    stroke_width*: float64
+    strokeWidth*: float64
   
   Shape* = object
     style*: ShapeStyle
@@ -76,53 +76,53 @@ type
 proc init*(_: typedesc[Canvas], size: Vec2, background: Color = Color()): Canvas =
   result = Canvas(size: size, background: background)
 
-const DEFAULT_SHAPE_STYLE = ShapeStyle(stroke: grey(0), stroke_width: 1.0)
+const DEFAULT_SHAPE_STYLE = ShapeStyle(stroke: grey(0), strokeWidth: 1.0)
 
-macro default_style(param_node: untyped, default: static[ShapeStyle], proc_node: untyped): untyped =
-  result = proc_node.copy_nim_tree()
+macro defaultStyle(paramNode: untyped, default: static[ShapeStyle], procNode: untyped): untyped =
+  result = procNode.copyNimTree()
   let
-    name = nim_ident_normalize(param_node.str_val)
-    new_params = new_tree(nnkFormalParams)
-    call = new_tree(nnkCall, proc_node.name)
-  for it, param in proc_node.params:
-    if it > 0 and param[0].eq_ident(name):
-      let constr = new_tree(nnkObjConstr, bind_sym("ShapeStyle"))
-      for name, value in default.field_pairs:
-        let def = new_tree(nnkIdentDefs, ident(name), new_empty_node(), new_lit(value))
-        new_params.add(def)
-        constr.add(new_tree(nnkExprColonExpr, ident(name), ident(name)))
+    name = nimIdentNormalize(paramNode.strVal)
+    newParams = newTree(nnkFormalParams)
+    call = newTree(nnkCall, procNode.name)
+  for it, param in procNode.params:
+    if it > 0 and param[0].eqIdent(name):
+      let constr = newTree(nnkObjConstr, bindSym("ShapeStyle"))
+      for name, value in default.fieldPairs:
+        let def = newTree(nnkIdentDefs, ident(name), newEmptyNode(), newLit(value))
+        newParams.add(def)
+        constr.add(newTree(nnkExprColonExpr, ident(name), ident(name)))
       call.add(constr)
     else:
-      new_params.add(param.copy_nim_tree())
+      newParams.add(param.copyNimTree())
       for it2 in 0..<(param.len - 2):
         call.add(param[it2])
-  result.params = new_params
-  result.body = new_stmt_list(call)
-  result = new_stmt_list(proc_node, result)
+  result.params = newParams
+  result.body = newStmtList(call)
+  result = newStmtList(procNode, result)
 
 proc rect*(canvas: var Canvas,
            pos, size: Vec2,
-           style: ShapeStyle) {.default_style(style, DEFAULT_SHAPE_STYLE).} =
+           style: ShapeStyle) {.defaultStyle(style, DEFAULT_SHAPE_STYLE).} =
   canvas.shapes.add(Shape(kind: ShapeRect, pos: pos, size: size, style: style))
 
 proc rect*(canvas: var Canvas,
            box: Box2,
-           style: ShapeStyle) {.default_style(style, DEFAULT_SHAPE_STYLE).} =
+           style: ShapeStyle) {.defaultStyle(style, DEFAULT_SHAPE_STYLE).} =
   canvas.shapes.add(Shape(kind: ShapeRect, pos: box.min, size: box.size, style: style))
 
 proc ellipse*(canvas: var Canvas,
               pos, size: Vec2,
-              style: ShapeStyle) {.default_style(style, DEFAULT_SHAPE_STYLE).} =
+              style: ShapeStyle) {.defaultStyle(style, DEFAULT_SHAPE_STYLE).} =
   canvas.shapes.add(Shape(kind: ShapeEllipse, pos: pos, size: size, style: style))
 
 proc line*(canvas: var Canvas,
            start, stop: Vec2,
-           style: ShapeStyle) {.default_style(style, DEFAULT_SHAPE_STYLE).} =
+           style: ShapeStyle) {.defaultStyle(style, DEFAULT_SHAPE_STYLE).} =
   canvas.shapes.add(Shape(kind: ShapeLine, start: start, stop: stop, style: style))
 
 proc path*(canvas: var Canvas,
            path: Path,
-           style: ShapeStyle) {.default_style(style, DEFAULT_SHAPE_STYLE).} =
+           style: ShapeStyle) {.defaultStyle(style, DEFAULT_SHAPE_STYLE).} =
   canvas.shapes.add(Shape(kind: ShapePath, subpaths: @[path], style: style))
 
 type XmlBuilder = object
@@ -131,7 +131,7 @@ type XmlBuilder = object
 proc emit(builder: var XmlBuilder, text: string) =
   builder.data.add(text)
 
-proc begin_tag(builder: var XmlBuilder,
+proc beginTag(builder: var XmlBuilder,
                name: string,
                attrs: openArray[(string, string)]) =
   builder.emit("<")
@@ -144,7 +144,7 @@ proc begin_tag(builder: var XmlBuilder,
     builder.emit("\"")
   builder.emit(">")
 
-proc end_tag(builder: var XmlBuilder, name: string) =
+proc endTag(builder: var XmlBuilder, name: string) =
   builder.emit("</")
   builder.emit(name)
   builder.emit(">")
@@ -152,33 +152,33 @@ proc end_tag(builder: var XmlBuilder, name: string) =
 proc tag(builder: var XmlBuilder,
          name: string,
          attrs: openArray[(string, string)]) =
-  builder.begin_tag(name, attrs)
-  builder.end_tag(name)
+  builder.beginTag(name, attrs)
+  builder.endTag(name)
 
 template tag(builder: var XmlBuilder,
              name: string,
              attrs: openArray[(string, string)],
              body: untyped) =
   block:
-    builder.begin_tag(name, attrs)
-    defer: builder.end_tag(name)
+    builder.beginTag(name, attrs)
+    defer: builder.endTag(name)
     body
 
-proc to_svg(color: Color): string =
+proc toSvg(color: Color): string =
   if color == Color():
     result = "none"
   else:
-    result = color.to_hex()
+    result = color.toHex()
 
-proc to_svg_attrs(style: ShapeStyle): seq[(string, string)] =
+proc toSvgAttrs(style: ShapeStyle): seq[(string, string)] =
   result = @{
-    "fill": style.fill.to_svg(),
-    "stroke": style.stroke.to_svg(),
-    "stroke-width": $style.stroke_width
+    "fill": style.fill.toSvg(),
+    "stroke": style.stroke.toSvg(),
+    "stroke-width": $style.strokeWidth
   }
 
-proc gen_svg(shape: Shape, builder: var XmlBuilder) =
-  let attrs = shape.style.to_svg_attrs()
+proc genSvg(shape: Shape, builder: var XmlBuilder) =
+  let attrs = shape.style.toSvgAttrs()
   case shape.kind:
     of ShapeRect:
       builder.tag("rect", attrs & @{
@@ -204,7 +204,7 @@ proc gen_svg(shape: Shape, builder: var XmlBuilder) =
     of ShapePath:
       discard
 
-proc gen_svg(canvas: Canvas, builder: var XmlBuilder) =
+proc genSvg(canvas: Canvas, builder: var XmlBuilder) =
   let attrs = {
     "xmlns": "http://www.w3.org/2000/svg",
     "width": $canvas.size.x,
@@ -218,15 +218,15 @@ proc gen_svg(canvas: Canvas, builder: var XmlBuilder) =
         "y": "0",
         "width": $canvas.size.x,
         "height": $canvas.size.y,
-        "fill": canvas.background.to_svg()
+        "fill": canvas.background.toSvg()
       })
     for shape in canvas.shapes:
-      shape.gen_svg(builder)
+      shape.genSvg(builder)
 
-proc to_svg*(canvas: Canvas): string =
+proc toSvg*(canvas: Canvas): string =
   var builder = XmlBuilder()
-  canvas.gen_svg(builder)
+  canvas.genSvg(builder)
   result = builder.data
 
-proc save_svg*(canvas: Canvas, path: string) =
-  write_file(path, canvas.to_svg())
+proc saveSvg*(canvas: Canvas, path: string) =
+  writeFile(path, canvas.toSvg())

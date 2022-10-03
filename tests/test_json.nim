@@ -19,28 +19,28 @@ import exprgrad/io/[jsonformat, faststreams]
 import ../tools/test_framework
 
 test "base":
-  check parse_json[bool]("false") == false
-  check parse_json[bool]("true") == true
-  check parse_json[int]("10") == 10
-  check parse_json[int]("-10") == -10
-  check parse_json[int]("0") == 0
-  check parse_json[float]("3.14") == 3.14
-  check parse_json[string]("\"Hello, world!\"") == "Hello, world!"
-  check parse_json[string]("\"Escape sequences: \\n\\t\\\"\\\\\"") == "Escape sequences: \n\t\"\\"
+  check parseJson[bool]("false") == false
+  check parseJson[bool]("true") == true
+  check parseJson[int]("10") == 10
+  check parseJson[int]("-10") == -10
+  check parseJson[int]("0") == 0
+  check parseJson[float]("3.14") == 3.14
+  check parseJson[string]("\"Hello, world!\"") == "Hello, world!"
+  check parseJson[string]("\"Escape sequences: \\n\\t\\\"\\\\\"") == "Escape sequences: \n\t\"\\"
 
 test "collections":
-  check parse_json[seq[int]]("[]") == new_seq[int]()
-  check parse_json[seq[int]]("[1, 2, 3]") == @[1, 2, 3]
-  check parse_json[seq[seq[int]]]("[[1, 2, 3], [4, 5, 6]]") == @[@[1, 2, 3], @[4, 5, 6]]
-  check parse_json[array[3, int]]("[1, 2, 3]") == [1, 2, 3]
-  check parse_json[array[3, seq[int]]]("[[], [1], [2, 3]]") == [new_seq[int](), @[1], @[2, 3]]
-  check parse_json[Table[string, float]]("{\"x\": 1, \"y\": 2.5}") == to_table({"x": 1.0, "y": 2.5})
-  check parse_json[Table[string, seq[int]]]("{\"x\": [], \"y\": [1], \"z\": [2, 3]}") == to_table({
-    "x": new_seq[int](), "y": @[1], "z": @[2, 3]
+  check parseJson[seq[int]]("[]") == newSeq[int]()
+  check parseJson[seq[int]]("[1, 2, 3]") == @[1, 2, 3]
+  check parseJson[seq[seq[int]]]("[[1, 2, 3], [4, 5, 6]]") == @[@[1, 2, 3], @[4, 5, 6]]
+  check parseJson[array[3, int]]("[1, 2, 3]") == [1, 2, 3]
+  check parseJson[array[3, seq[int]]]("[[], [1], [2, 3]]") == [newSeq[int](), @[1], @[2, 3]]
+  check parseJson[Table[string, float]]("{\"x\": 1, \"y\": 2.5}") == toTable({"x": 1.0, "y": 2.5})
+  check parseJson[Table[string, seq[int]]]("{\"x\": [], \"y\": [1], \"z\": [2, 3]}") == toTable({
+    "x": newSeq[int](), "y": @[1], "z": @[2, 3]
   })
-  check parse_json[Table[string, seq[int]]]("{}") == init_table[string, seq[int]]()
-  check parse_json[Table[string, int]]("{\"one\": 1}") == to_table({"one": 1})
-  check parse_json[Table[string, bool]]("{\"true\": true}") == to_table({"true": true})
+  check parseJson[Table[string, seq[int]]]("{}") == initTable[string, seq[int]]()
+  check parseJson[Table[string, int]]("{\"one\": 1}") == toTable({"one": 1})
+  check parseJson[Table[string, bool]]("{\"true\": true}") == toTable({"true": true})
 
 type
   TestObjKind = enum
@@ -52,64 +52,64 @@ type
     z: Table[string, bool]
   
   TestObj2 = object
-    bool_val: bool
-    int_val: int 
-    float_val: float
-    table_val: Table[string, int]
+    boolVal: bool
+    intVal: int 
+    floatVal: float
+    tableVal: Table[string, int]
     case kind: TestObjKind:
-      of TestObjArray: array_val: array[3, int]
-      of TestObjSeq: seq_val: seq[int]
+      of TestObjArray: arrayVal: array[3, int]
+      of TestObjSeq: seqVal: seq[int]
 
 proc `==`(a, b: TestObj2): bool =
-  result = a.bool_val == b.bool_val and
-           a.int_val == b.int_val and
-           a.float_val == b.float_val and
-           a.table_val == b.table_val
+  result = a.boolVal == b.boolVal and
+           a.intVal == b.intVal and
+           a.floatVal == b.floatVal and
+           a.tableVal == b.tableVal
   if result and a.kind == b.kind:
     case a.kind:
-      of TestObjArray: result = a.array_val == b.array_val
-      of TestObjSeq: result = a.seq_val == b.seq_val
+      of TestObjArray: result = a.arrayVal == b.arrayVal
+      of TestObjSeq: result = a.seqVal == b.seqVal
   else:
     result = false
 
-json_serializable(TestObjKind, TestObj, TestObj2)
+jsonSerializable(TestObjKind, TestObj, TestObj2)
 
 test "json_serializable":
-  check parse_json[TestObjKind]("0") == TestObjArray
-  check parse_json[TestObjKind]("1") == TestObjSeq
-  check parse_json[TestObj]("{}") == TestObj()
-  check parse_json[TestObj]("{\"x\": 1}") == TestObj(x: 1)
-  check parse_json[TestObj]("{\"y\": \"Hello\", \"x\": 2}") == TestObj(x: 2, y: "Hello")
-  check parse_json[TestObj]("{\"y\": \"Test\", \"x\": 3, \"z\": {\"true\": true}}") == TestObj(
-    x: 3, y: "Test", z: to_table({"true": true})
+  check parseJson[TestObjKind]("0") == TestObjArray
+  check parseJson[TestObjKind]("1") == TestObjSeq
+  check parseJson[TestObj]("{}") == TestObj()
+  check parseJson[TestObj]("{\"x\": 1}") == TestObj(x: 1)
+  check parseJson[TestObj]("{\"y\": \"Hello\", \"x\": 2}") == TestObj(x: 2, y: "Hello")
+  check parseJson[TestObj]("{\"y\": \"Test\", \"x\": 3, \"z\": {\"true\": true}}") == TestObj(
+    x: 3, y: "Test", z: toTable({"true": true})
   )
-  check parse_json[TestObj2]("{}") == TestObj2()
-  check parse_json[TestObj2]("{\"bool_val\": true}") == TestObj2(bool_val: true)
-  check parse_json[TestObj2]("{\"bool_val\": true, \"table_val\": {}}") == TestObj2(bool_val: true)
-  check parse_json[TestObj2]("{\"bool_val\": true, \"table_val\": {\"zero\": 0}}") == TestObj2(
-    bool_val: true, table_val: to_table({"zero": 0})
+  check parseJson[TestObj2]("{}") == TestObj2()
+  check parseJson[TestObj2]("{\"boolVal\": true}") == TestObj2(boolVal: true)
+  check parseJson[TestObj2]("{\"boolVal\": true, \"tableVal\": {}}") == TestObj2(boolVal: true)
+  check parseJson[TestObj2]("{\"boolVal\": true, \"tableVal\": {\"zero\": 0}}") == TestObj2(
+    boolVal: true, tableVal: toTable({"zero": 0})
   )
-  check parse_json[TestObj2]("{\"bool_val\": true, \"table_val\": {\"zero\": 0}, \"kind\": 1}") == TestObj2(
-    bool_val: true, table_val: to_table({"zero": 0}), kind: TestObjSeq
+  check parseJson[TestObj2]("{\"boolVal\": true, \"tableVal\": {\"zero\": 0}, \"kind\": 1}") == TestObj2(
+    boolVal: true, tableVal: toTable({"zero": 0}), kind: TestObjSeq
   )
-  check parse_json[TestObj2]("{\"seq_val\": [1, 2, 3, 4], \"kind\": 1}") == TestObj2(
-    kind: TestObjSeq, seq_val: @[1, 2, 3, 4]
+  check parseJson[TestObj2]("{\"seqVal\": [1, 2, 3, 4], \"kind\": 1}") == TestObj2(
+    kind: TestObjSeq, seqVal: @[1, 2, 3, 4]
   )
-  check parse_json[TestObj2]("{\"seq_val\": [1, 2, 3, 4], \"kind\": 0}") == TestObj2(kind: TestObjArray)
-  check parse_json[TestObj2]("{\"array_val\": [1, 2, 3], \"kind\": 0}") == TestObj2(
-    kind: TestObjArray, array_val: [1, 2, 3]
+  check parseJson[TestObj2]("{\"seqVal\": [1, 2, 3, 4], \"kind\": 0}") == TestObj2(kind: TestObjArray)
+  check parseJson[TestObj2]("{\"arrayVal\": [1, 2, 3], \"kind\": 0}") == TestObj2(
+    kind: TestObjArray, arrayVal: [1, 2, 3]
   )
 
 test "json_node":
-  check parse_json[JsonNode]("1") == new_jint(1)
-  check parse_json[JsonNode]("123") == new_jint(123)
-  check parse_json[JsonNode]("3.14") == new_jfloat(3.14)
-  check parse_json[JsonNode]("\"Hello, world!\\n\"") == new_jstring("Hello, world!\n")
-  check parse_json[JsonNode]("[1, 2, 3]") == new_jarray([new_jint(1), new_jint(2), new_jint(3)])
-  check parse_json[JsonNode]("[[null, 1, 2, 2.5], true, false]") == new_jarray([
-    new_jarray([new_jnull(), new_jint(1), new_jint(2), new_jfloat(2.5)]),
-    new_jbool(true), new_jbool(false)
+  check parseJson[JsonNode]("1") == newJInt(1)
+  check parseJson[JsonNode]("123") == newJInt(123)
+  check parseJson[JsonNode]("3.14") == newJFloat(3.14)
+  check parseJson[JsonNode]("\"Hello, world!\\n\"") == newJString("Hello, world!\n")
+  check parseJson[JsonNode]("[1, 2, 3]") == newJarray([newJInt(1), newJInt(2), newJInt(3)])
+  check parseJson[JsonNode]("[[null, 1, 2, 2.5], true, false]") == newJarray([
+    newJarray([newJNull(), newJInt(1), newJInt(2), newJFloat(2.5)]),
+    newJBool(true), newJBool(false)
   ])
-  check parse_json[JsonNode]("{\"x\": 1, \"y\": 2}") == new_jobject({
-    "x": new_jint(1), "y": new_jint(2)
+  check parseJson[JsonNode]("{\"x\": 1, \"y\": 2}") == newJobject({
+    "x": newJInt(1), "y": newJInt(2)
   })

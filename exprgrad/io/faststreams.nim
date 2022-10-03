@@ -23,40 +23,40 @@ type ReadStream* = object
   left: int
   pos: int64
 
-proc fill_buffer(stream: var ReadStream) =
+proc fillBuffer(stream: var ReadStream) =
   stream.cur = 0
   when nimvm:
-    assert stream.file.is_nil
+    assert stream.file.isNil
     for it in 0..<stream.buffer.len:
       stream.buffer[it] = '\0'
   else:
-    if stream.file.is_nil:
-      zero_mem(stream.buffer[0].addr, stream.buffer.len)
+    if stream.file.isNil:
+      zeroMem(stream.buffer[0].addr, stream.buffer.len)
     else:
-      stream.left = stream.file.read_buffer(
+      stream.left = stream.file.readBuffer(
         stream.buffer[0].addr, stream.buffer.len
       )
 
-proc init_read_stream*(str: string): ReadStream =
+proc initReadStream*(str: string): ReadStream =
   result.buffer = str
   result.left = str.len
 
-proc open_read_stream*(path: string, buffer_size: int = 2 ^ 14): ReadStream =
+proc openReadStream*(path: string, bufferSize: int = 2 ^ 14): ReadStream =
   when nimvm:
-    result = init_read_stream(read_file(path))
+    result = initReadStream(readFile(path))
   else:
-    assert buffer_size > 0
-    if not file_exists(path):
-      raise new_exception(IoError, "Unable to open file " & path)
+    assert bufferSize > 0
+    if not fileExists(path):
+      raise newException(IOError, "Unable to open file " & path)
     result.file = open(path, fmRead)
-    result.buffer = new_string(buffer_size)
-    result.fill_buffer()
+    result.buffer = newString(bufferSize)
+    result.fillBuffer()
 
 proc close*(stream: var ReadStream) =
   when nimvm:
     discard
   else:
-    if not stream.file.is_nil:
+    if not stream.file.isNil:
       stream.file.close()
       stream.file = nil
 
@@ -66,58 +66,58 @@ proc seek*(stream: var ReadStream, pos: int64) =
     stream.cur = int(pos)
     stream.left = stream.buffer.len - int(pos)
   else:
-    if stream.file.is_nil:
+    if stream.file.isNil:
       stream.cur = int(pos)
       stream.left = stream.buffer.len - int(pos)
     else:
-      stream.file.set_file_pos(pos)
-      stream.fill_buffer()
+      stream.file.setFilePos(pos)
+      stream.fillBuffer()
 
 {.push inline.}
 proc position*(stream: var ReadStream): int64 = stream.pos
 
-proc peek_char*(stream: ReadStream): char =
+proc peekChar*(stream: ReadStream): char =
   stream.buffer[stream.cur]
 
-proc read_char*(stream: var ReadStream): char =
+proc readChar*(stream: var ReadStream): char =
   result = stream.buffer[stream.cur]
   stream.cur += 1
   stream.left -= 1
   stream.pos += 1
   if stream.cur >= stream.buffer.len:
-    stream.fill_buffer()
+    stream.fillBuffer()
 
-proc peek_uint8*(stream: ReadStream): uint8 = uint8(stream.peek_char())
-proc read_uint8*(stream: var ReadStream): uint8 = uint8(stream.read_char())
+proc peekUint8*(stream: ReadStream): uint8 = uint8(stream.peekChar())
+proc readUint8*(stream: var ReadStream): uint8 = uint8(stream.readChar())
 
-proc read_byte*(stream: var ReadStream): byte = byte(stream.read_char())
-proc peek_byte*(stream: var ReadStream): byte = byte(stream.peek_char())
+proc readByte*(stream: var ReadStream): byte = byte(stream.readChar())
+proc peekByte*(stream: var ReadStream): byte = byte(stream.peekChar())
 
-proc take_char*(stream: var ReadStream, chr: char): bool =
-  result = stream.peek_char() == chr
+proc takeChar*(stream: var ReadStream, chr: char): bool =
+  result = stream.peekChar() == chr
   if result:
-    discard stream.read_char()
+    discard stream.readChar()
 
-proc at_end*(stream: ReadStream): bool = stream.left <= 0
+proc atEnd*(stream: ReadStream): bool = stream.left <= 0
 
 proc skip*(stream: var ReadStream, count: int) =
   for it in 0..<count:
-    discard stream.read_char()
+    discard stream.readChar()
 
 proc skip*(stream: var ReadStream, chars: set[char]) =
-  while stream.peek_char() in chars:
-    discard stream.read_char()
+  while stream.peekChar() in chars:
+    discard stream.readChar()
 
-proc skip_whitespace*(stream: var ReadStream) =
+proc skipWhitespace*(stream: var ReadStream) =
   stream.skip({' ', '\n', '\t', '\r'})
 
-proc skip_until*(stream: var ReadStream, stop: set[char]) =
-  while not stream.at_end and stream.peek_char() notin stop:
-    discard stream.read_char()
+proc skipUntil*(stream: var ReadStream, stop: set[char]) =
+  while not stream.atEnd and stream.peekChar() notin stop:
+    discard stream.readChar()
 
-proc read_until*(stream: var ReadStream, stop: set[char]): string =
-  while not stream.at_end and stream.peek_char() notin stop:
-    result.add(stream.read_char())
+proc readUntil*(stream: var ReadStream, stop: set[char]): string =
+  while not stream.atEnd and stream.peekChar() notin stop:
+    result.add(stream.readChar())
 {.pop.}
 
 type WriteStream* = object
@@ -125,15 +125,15 @@ type WriteStream* = object
   buffer: string
   cur: int
 
-proc open_write_stream*(path: string, buffer_size: int = 2 ^ 14): WriteStream =
-  assert buffer_size > 0
+proc openWriteStream*(path: string, bufferSize: int = 2 ^ 14): WriteStream =
+  assert bufferSize > 0
   result.file = open(path, fmWrite)
-  result.buffer = new_string(buffer_size)
+  result.buffer = newString(bufferSize)
 
-proc write_all(stream: var WriteStream) =
-  let written = stream.file.write_buffer(stream.buffer[0].addr, stream.cur)
+proc writeAll(stream: var WriteStream) =
+  let written = stream.file.writeBuffer(stream.buffer[0].addr, stream.cur)
   if written != stream.cur:
-    raise new_exception(ValueError, "Failed to write buffer")
+    raise newException(ValueError, "Failed to write buffer")
   stream.cur = 0
 
 {.push inline.}
@@ -141,10 +141,10 @@ proc write*(stream: var WriteStream, x: char) =
   stream.buffer[stream.cur] = x
   stream.cur += 1
   if stream.cur >= stream.buffer.len:
-    if stream.file.is_nil:
-      stream.buffer &= new_string(stream.buffer.len)
+    if stream.file.isNil:
+      stream.buffer &= newString(stream.buffer.len)
     else:
-      stream.write_all()
+      stream.writeAll()
 
 proc write*(stream: var WriteStream, x: uint8) =
   stream.write(cast[char](x))
@@ -160,13 +160,13 @@ proc write*(stream: var WriteStream, data: openArray[uint8]) =
 {.pop.}
 
 proc flush*(stream: var WriteStream) =
-  if not stream.file.is_nil:
-    stream.write_all()
-    stream.file.flush_file()
+  if not stream.file.isNil:
+    stream.writeAll()
+    stream.file.flushFile()
 
 proc close*(stream: var WriteStream) =
-  if not stream.file.is_nil:
-    stream.write_all()
-    stream.file.flush_file()
+  if not stream.file.isNil:
+    stream.writeAll()
+    stream.file.flushFile()
     stream.file.close()
     stream.file = nil
