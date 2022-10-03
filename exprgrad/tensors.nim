@@ -39,7 +39,7 @@ proc allocShape*[T](tensor: Tensor[T], shape: openArray[int], fillZero: static[b
   for it in 0..<shape.len:
     tensor.shape[it] = shape[it]
     len *= shape[it]
-  if len != tensor.len:
+  if len != tensor.len or tensor.isView:
     if not tensor.data.isNil and not tensor.isView:
       dealloc(tensor.data)
     tensor.data = cast[ptr UncheckedArray[T]](alloc(sizeof(T) * len))
@@ -70,10 +70,17 @@ proc newTensor*[T](shape: openArray[int], value: T): Tensor[T] =
   for it in 0..<result.len:
     result.data[it] = value
 
+proc new*[T](_: typedesc[Tensor[T]], shape: openArray[int]): Tensor[T] = newTensor[T](shape)
+proc new*[T](_: typedesc[Tensor[T]], shape: openArray[int], data: seq[T]): Tensor[T] = newTensor(shape, data)
+proc new*[T](_: typedesc[Tensor[T]], shape: openArray[int], value: T): Tensor[T] = newTensor(shape, value)
+
 proc newRandTensor*[T](shape: openArray[int], slice: HSlice[T, T]): Tensor[T] =
   result = newTensor[T](shape)
   for it in 0..<result.shape.prod:
     result.data[it] = rand(slice)
+
+proc rand*[T](_: typedesc[Tensor[T]], shape: openArray[int], slice: HSlice[T, T]): Tensor[T] =
+  result = newRandTensor(shape, slice)
 
 proc clone*[T](tensor: Tensor[T]): Tensor[T] =
   result = Tensor[T]()
@@ -89,36 +96,38 @@ proc `==`*[T](a, b: Tensor[T]): bool =
         return false
     result = true
 
-proc `{}`*[T](tensor: Tensor[T], it: int): var T {.inline.} = tensor.data[it]
-proc `{}=`*[T](tensor: Tensor[T], it: int, value: T) {.inline.} = tensor.data[it] = value
+{.push inline.}
+proc `{}`*[T](tensor: Tensor[T], it: int): var T = tensor.data[it]
+proc `{}=`*[T](tensor: Tensor[T], it: int, value: T) = tensor.data[it] = value
 
-proc `[]`*[T](tensor: Tensor[T], it: int): var T {.inline.} = tensor.data[it]
-proc `[]=`*[T](tensor: Tensor[T], it: int, value: T) {.inline.} = tensor.data[it] = value
+proc `[]`*[T](tensor: Tensor[T], it: int): var T = tensor.data[it]
+proc `[]=`*[T](tensor: Tensor[T], it: int, value: T) = tensor.data[it] = value
 
-proc `[]`*[T](tensor: Tensor[T], y, x: int): var T {.inline.} =
+proc `[]`*[T](tensor: Tensor[T], y, x: int): var T =
   tensor.data[x + y * tensor.shape[^1]]
-proc `[]=`*[T](tensor: Tensor[T], y, x: int, value: T) {.inline.} =
+proc `[]=`*[T](tensor: Tensor[T], y, x: int, value: T) =
   tensor.data[x + y * tensor.shape[^1]] = value
 
-proc `[]`*[T](tensor: Tensor[T], z, y, x: int): var T {.inline.} =
+proc `[]`*[T](tensor: Tensor[T], z, y, x: int): var T =
   tensor.data[x + y * tensor.shape[^1] + z * tensor.shape[^1] * tensor.shape[^2]]
-proc `[]=`*[T](tensor: Tensor[T], z, y, x: int, value: T) {.inline.} =
+proc `[]=`*[T](tensor: Tensor[T], z, y, x: int, value: T) =
   tensor.data[x + y * tensor.shape[^1] + z * tensor.shape[^1] * tensor.shape[^2]] = value
 
-proc `[]`*[T](tensor: Tensor[T], w, z, y, x: int): var T {.inline.} =
+proc `[]`*[T](tensor: Tensor[T], w, z, y, x: int): var T =
   tensor.data[
     x +
     y * tensor.shape[^1] +
     z * tensor.shape[^2] * tensor.shape[^1] +
     w * tensor.shape[^3] * tensor.shape[^2] * tensor.shape[^1]
   ]
-proc `[]=`*[T](tensor: Tensor[T], w, z, y, x: int, value: T) {.inline.} =
+proc `[]=`*[T](tensor: Tensor[T], w, z, y, x: int, value: T) =
   tensor.data[
     x +
     y * tensor.shape[^1] +
     z * tensor.shape[^2] * tensor.shape[^1] +
     w * tensor.shape[^3] * tensor.shape[^2] * tensor.shape[^1]
   ] = value
+{.pop.}
 
 proc stringify[T](tensor: Tensor[T], dim: int, index: var int): string =
   if dim >= tensor.shape.len:

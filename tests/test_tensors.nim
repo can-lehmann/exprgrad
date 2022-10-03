@@ -18,11 +18,18 @@ import exprgrad
 import ../tools/test_framework
 
 let
-  a = newTensor([2, 3], @[int 1, 2, 3, 4, 5, 6])
-  b = newTensor([3, 2], @[int 1, 2, 3, 4, 5, 6])
-  c = newTensor([2, 2], @[int 22, 28, 49, 64])
-  d = newTensor([2, 2], @[int 1, 2, 3, 4])
-  e = newTensor([1, 2, 3], @[int 1, 2, 3, 4, 5, 6])
+  a = Tensor.new([2, 3], @[int 1, 2, 3, 4, 5, 6])
+  b = Tensor.new([3, 2], @[int 1, 2, 3, 4, 5, 6])
+  c = Tensor.new([2, 2], @[int 22, 28, 49, 64])
+  d = Tensor.new([2, 2], @[int 1, 2, 3, 4])
+  e = Tensor.new([1, 2, 3], @[int 1, 2, 3, 4, 5, 6])
+
+test "constructors":
+  check a == newTensor([2, 3], @[int 1, 2, 3, 4, 5, 6])
+  check a == Tensor.new([2, 3], @[int 1, 2, 3, 4, 5, 6])
+  check Tensor.new([2, 2], 10) == Tensor.new([2, 2], @[10, 10, 10, 10])
+  check Tensor[int].new([2, 2]) == Tensor.new([2, 2], 0)
+  check Tensor.rand([3, 2], 10..10) == Tensor.new([3, 2], 10)
 
 test "equality":
   check a == a
@@ -54,7 +61,7 @@ test "access":
 test "operators":
   check a * 2 div 2 == a
   check a + a == a * 2
-  check a - a == newTensor[int](a.shape)
+  check a - a == Tensor[int].new(a.shape)
   check max(a, 2 * a) == 2 * a
   check min(a, 2 * a) == a
 
@@ -65,36 +72,39 @@ test "transpose":
   check a.transpose().transpose() == a
   check b.transpose().transpose() == b
   check c.transpose().transpose() == c
-  check a.transpose() == newTensor([3, 2], @[int 1, 4, 2, 5, 3, 6])
+  check a.transpose() == Tensor.new([3, 2], @[int 1, 4, 2, 5, 3, 6])
 
 test "oneHot":
-  check newTensor[int]([2], @[0, 1]).oneHot(2) == newTensor[int]([2, 2], @[1, 0, 0, 1])
-  check newTensor[int]([2], @[0, 1]).oneHot(3) == newTensor[int]([2, 3], @[1, 0, 0, 0, 1, 0])
+  check Tensor.new([2], @[0, 1]).oneHot(2) == Tensor.new([2, 2], @[1, 0, 0, 1])
+  check Tensor.new([2], @[0, 1]).oneHot(3) == Tensor.new([2, 3], @[1, 0, 0, 0, 1, 0])
 
 test "viewFirst":
-  check b.viewFirst(0..0) == newTensor([1, 2], @[1, 2])
-  check b.viewFirst(1..2) == newTensor([2, 2], @[3, 4, 5, 6])
+  check b.viewFirst(0..0) == Tensor.new([1, 2], @[1, 2])
+  check b.viewFirst(1..2) == Tensor.new([2, 2], @[3, 4, 5, 6])
   check b.viewFirst(0..0) != b.viewFirst(1..1)
-  check a.viewFirst(0..0) == newTensor([1, 3], @[1, 2, 3])
+  check a.viewFirst(0..0) == Tensor.new([1, 3], @[1, 2, 3])
+  
+  a.viewFirst(0..0).allocShape([1, 3])
+  check a == Tensor.new([2, 3], @[1, 2, 3, 4, 5, 6])
 
 test "selectSamples":
   check b.selectSamples([0, 1, 2]) == b
-  check b.selectSamples([1]) == newTensor([1, 2], @[3, 4])
-  check b.selectSamples([1, 0]) == newTensor([2, 2], @[3, 4, 1, 2])
-  check a.selectSamples([1]) == newTensor([1, 3], @[4, 5, 6])
+  check b.selectSamples([1]) == Tensor.new([1, 2], @[3, 4])
+  check b.selectSamples([1, 0]) == Tensor.new([2, 2], @[3, 4, 1, 2])
+  check a.selectSamples([1]) == Tensor.new([1, 3], @[4, 5, 6])
 
   check b.selectSamples([1, 2]) == b.viewFirst(1..2)
   check b.selectSamples([2, 1]) != b.viewFirst(1..2)
 
 test "concatFirst":
   check concatFirst(
-    newTensor([1], @[1]),
-    newTensor([1], @[2])
-  ) == newTensor([2], @[1, 2])
+    Tensor.new([1], @[1]),
+    Tensor.new([1], @[2])
+  ) == Tensor.new([2], @[1, 2])
   check concatFirst(
-    newTensor([1, 2], @[1, 2]),
-    newTensor([2, 2], @[3, 4, 5, 6])
-  ) == newTensor([3, 2], @[1, 2, 3, 4, 5, 6])
+    Tensor.new([1, 2], @[1, 2]),
+    Tensor.new([2, 2], @[3, 4, 5, 6])
+  ) == Tensor.new([3, 2], @[1, 2, 3, 4, 5, 6])
   check concatFirst(e, e).viewFirst(0, 1) == e
 
 test "reshape":
