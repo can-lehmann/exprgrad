@@ -233,7 +233,7 @@ proc isMatrix*[T](tensor: Tensor[T]): bool {.inline.} =
 proc `*`*[T](a, b: Tensor[T]): Tensor[T] =
   ## Matrix multiplication
   assert a.isMatrix and b.isMatrix
-  assert a.shape[0] == b.shape[1]
+  assert a.shape[1] == b.shape[0]
   result = newTensor[T]([a.shape[0], b.shape[1]])
   for y in 0..<result.shape[0]:
     for it in 0..<a.shape[1]:

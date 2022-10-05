@@ -67,6 +67,7 @@ test "operators":
 
 test "matmul":
   check a * b == c
+  check d * a == Tensor.new([2, 3], @[9, 12, 15, 19, 26, 33])
 
 test "transpose":
   check a.transpose().transpose() == a
