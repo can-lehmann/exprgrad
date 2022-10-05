@@ -23,6 +23,7 @@ tests/test_dnn
 tests/test_csv
 tests/test_gpu
 tests/test_errors
+tests/test_talks
 tests/test_idxformat
 tests/data.bin
 tests/module.bc

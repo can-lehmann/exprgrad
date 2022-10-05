@@ -40,6 +40,10 @@ proc countUsages(op: TensorOp, usages: var seq[int]) =
   for dim in op.dims:
     dim.countUsages(usages)
 
+proc countUsages(loop: Loop, usages: var seq[int]) =
+  loop.start.countUsages(usages)
+  loop.stop.countUsages(usages)
+
 proc countUsages(kernel: Kernel): seq[int] =
   result = newSeq[int](kernel.regs.len)
   if kernel.write.data != RegId(0):
@@ -49,12 +53,14 @@ proc countUsages(kernel: Kernel): seq[int] =
   for read in kernel.reads:
     if result[read.data] > 0:
       read.countUsages(result)
+  for loop in kernel.loops:
+    loop.countUsages(result)
   kernel.setup.countUsages(result)
 
 proc findInlineRegs(instrs: seq[Instr],
-                      inline: var seq[bool],
-                      declLevels: var seq[int],
-                      level: int) =
+                    inline: var seq[bool],
+                    declLevels: var seq[int],
+                    level: int) =
   for instr in instrs:
     case instr.kind:
       of InstrLoop: inline[instr.loopIter] = false
@@ -88,6 +94,7 @@ proc findInlineRegs(kernel: Kernel): seq[bool] =
   var declLevels = newSeq[int](kernel.regs.len)
   kernel.setup.findInlineRegs(result, declLevels, 0)
   kernel.expr.instrs.findInlineRegs(result, declLevels, 1)
+
 
 proc stringify(instr: Instr, regs: var seq[string], level: int): string =
   case instr.kind:
@@ -184,10 +191,7 @@ proc stringify(cache: LocalCache, regs: var seq[string]): string =
     result &= " + [" & $dim.interval.min & ", " & $dim.interval.max & "]"
 
 proc stringify(op: TensorOp, kind: TensorOpKind, regs: var seq[string], level: int): string =
-  result &= makeIndent(level)
-  if kind == OpRead:
-    result &= regs[op.data] & " = "
-  result &= $op.tensor
+  result = $op.tensor
   var dims = ""
   for it, dim in op.dims:
     if it != 0:
@@ -201,6 +205,15 @@ proc stringify(op: TensorOp, kind: TensorOpKind, regs: var seq[string], level: i
     result &= " += " & regs[op.data]
   if op.cache.exists:
     result &= " " & op.cache.stringify(regs)
+  
+  if kind == OpRead:
+    if regs[op.data].len == 0:
+      regs[op.data] = result
+      result = ""
+    else:
+      result = makeIndent(level) & regs[op.data] & " = " & result
+  else:
+    result = makeIndent(level) & result
 
 proc stringify(kernel: Kernel, level: int): string =
   var regs = newSeq[string](kernel.regs.len)

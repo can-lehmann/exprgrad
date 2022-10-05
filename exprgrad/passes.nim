@@ -1636,7 +1636,9 @@ proc sameRange(tokens: ShapeTokens, a, b: BoundsInfo): bool =
     case a.mode:
       of BoundsNone: result = false
       of BoundsDim:
-        result = tokens[a.tensor][a.dim] == tokens[b.tensor][b.dim]
+        result = a.dim < tokens[a.tensor].len and
+                 b.dim < tokens[b.tensor].len and
+                 tokens[a.tensor][a.dim] == tokens[b.tensor][b.dim]
       of BoundsLen:
         result = tokens[a.tensor] == tokens[b.tensor]
 
