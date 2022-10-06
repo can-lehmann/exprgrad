@@ -219,6 +219,11 @@ proc squares*[T](tensor: Tensor[T]): Tensor[T] =
   for it in 0..<tensor.len:
     result.data[it] = tensor.data[it] * tensor.data[it]
 
+proc clamp*[T](tensor: Tensor[T], a, b: T): Tensor[T] =
+  result = newTensor[T](tensor.shape)
+  for it in 0..<tensor.len:
+    result.data[it] = clamp(tensor.data[it], a, b)
+
 proc remap*[T](tensor: Tensor[T], fromMin, fromMax, toMin, toMax: T): Tensor[T] =
   result = newTensor[T](tensor.shape)
   let
