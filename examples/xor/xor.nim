@@ -18,20 +18,20 @@ randomize(10)
 
 let
   net = input("x")
-    .dense(2, 4).leaky_relu() # 1st Layer
+    .dense(2, 4).leakyRelu()  # 1st Layer
     .dense(4, 1).sigmoid()    # 2nd Layer
     .target("predict")
     .mse(input("y"))          # Loss
     .target("loss")
-    .backprop(gradient_descent.make_opt(rate=0.1)) # Train
+    .backprop(gradientDescent.makeOpt(rate=0.1)) # Train
     .target("train")
   model = compile[float32](net)
 
 let
-  train_x = new_tensor([4, 2], @[float32 0, 0, 0, 1, 1, 0, 1, 1])
-  train_y = new_tensor([4, 1], @[float32 0, 1, 1, 0])
+  trainX = Tensor.new([4, 2], @[float32 0, 0, 0, 1, 1, 0, 1, 1])
+  trainY = Tensor.new([4, 1], @[float32 0, 1, 1, 0])
 
 for epoch in 0..<5000:
-  model.apply("train", {"x": train_x, "y": train_y})
+  model.apply("train", {"x": trainX, "y": trainY})
 
-echo model.call("predict", {"x": train_x})
+echo model.call("predict", {"x": trainX})

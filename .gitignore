@@ -12,6 +12,9 @@ examples/gan/data/
 examples/gan/gan
 examples/gan/model.*
 examples/gan/sample.ppm
+examples/inverse_rendering/inverse_rendering
+examples/inverse_rendering/target.ppm
+examples/inverse_rendering/train/
 benchmarks/conv2/conv2
 benchmarks/conv2/nimcache
 benchmarks/matmul/matmul_gpu
