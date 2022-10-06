@@ -116,7 +116,7 @@ test "multiplyAndSquare":
     "b": Tensor.new([2, 1], @[float32 1, 2])
   }) == Tensor.new([2, 1], @[float32 5, 11])
   
-  discard model.call("multiplyAndSquare", {
+  check model.call("multiplyAndSquare", {
     "a": Tensor.new([2, 2], @[float32 1, 2, 3, 4]),
     "b": Tensor.new([2, 1], @[float32 1, 2])
   }) == Tensor.new([2, 1], @[float32 25, 121])
