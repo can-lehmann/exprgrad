@@ -15,7 +15,7 @@
 # Common abstraction over vector graphics backends
 
 import std/[macros, strutils]
-import geometry
+import geometrymath
 
 type Color* = object
   r*: uint8

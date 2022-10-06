@@ -15,7 +15,7 @@
 # Grid layout
 
 import std/[sequtils, algorithm, sugar, math]
-import canvas, geometry
+import canvas, geometrymath
 
 type
   Figure* = ref object of RootObj
