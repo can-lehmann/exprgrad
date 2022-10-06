@@ -211,7 +211,13 @@ proc foldSetup(index: var LinearIndex, kernel: Kernel) =
       of InstrIndex: regs[instr.res] = initLinearIndex(instr.indexLit)
       of InstrAdd: binaryOp(`+`)
       of InstrSub: binaryOp(`-`)
-      of InstrMul: binaryOp(`*`)
+      of InstrMul:
+        try:
+          binaryOp(`*`)
+        except ValueError: # TODO: Do not use exception?
+          regs[instr.res] = LinearIndex(
+            factors: toTable({instr.res: 1})
+          )
       of InstrNegate: unaryOp(`-`)
       else:
         regs[instr.res] = LinearIndex(
@@ -429,6 +435,14 @@ proc derive(instrs: seq[Instr],
         result.add(Instr(kind: InstrSelect, args: @[instr.args[0], grad, zero], res: gradA))
         result.add(Instr(kind: InstrSelect, args: @[instr.args[0], zero, grad], res: gradB))
         gradArgs = @[RegId(0), gradA, gradB]
+      of InstrSqrt:
+        let
+          (two, denom) = (regs.alloc(), regs.alloc())
+          gradX = regs.alloc()
+        result.add(Instr(kind: InstrScalar, scalarLit: 2.0, res: two))
+        result.add(Instr(kind: InstrMul, args: @[two, instr.res], res: denom))
+        result.add(Instr(kind: InstrDiv, args: @[grad, denom], res: gradX))
+        gradArgs = @[gradX]
       of InstrToScalar, InstrToIndex: gradArgs = @[RegId(0)]
       else: discard
     
