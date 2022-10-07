@@ -15,6 +15,7 @@ examples/gan/sample.ppm
 examples/inverse_rendering/inverse_rendering
 examples/inverse_rendering/target.ppm
 examples/inverse_rendering/train/
+examples/derivative/derivative
 benchmarks/conv2/conv2
 benchmarks/conv2/nimcache
 benchmarks/matmul/matmul_gpu

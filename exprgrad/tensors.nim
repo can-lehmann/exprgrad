@@ -82,6 +82,11 @@ proc newRandTensor*[T](shape: openArray[int], slice: HSlice[T, T]): Tensor[T] =
 proc rand*[T](_: typedesc[Tensor[T]], shape: openArray[int], slice: HSlice[T, T]): Tensor[T] =
   result = newRandTensor(shape, slice)
 
+proc linspace*[T](_: typedesc[Tensor[T]], slice: HSlice[T, T], count: int): Tensor[T] =
+  result = newTensor[T]([count])
+  for it in 0..<count:
+    result.data[it] = slice.a + (slice.b - slice.a) * (it / (count - 1))
+
 proc clone*[T](tensor: Tensor[T]): Tensor[T] =
   result = Tensor[T]()
   result.allocShape(tensor.shape)
