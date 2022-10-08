@@ -443,6 +443,25 @@ proc derive(instrs: seq[Instr],
         result.add(Instr(kind: InstrMul, args: @[two, instr.res], res: denom))
         result.add(Instr(kind: InstrDiv, args: @[grad, denom], res: gradX))
         gradArgs = @[gradX]
+      of InstrPow:
+        let
+          (one, newExponent, pow, powFactor) = (regs.alloc(), regs.alloc(), regs.alloc(), regs.alloc())
+          (product, log) = (regs.alloc(), regs.alloc())
+          (gradBase, gradExponent) = (regs.alloc(), regs.alloc())
+        
+        # d/da e^(ln(a) * b) = e^(ln(a) * b) * b * 1/a = b * a^b / a = b * a^(b - 1)
+        result.add(Instr(kind: InstrScalar, scalarLit: 1.0, res: one))
+        result.add(Instr(kind: InstrSub, args: @[instr.args[1], one], res: newExponent))
+        result.add(Instr(kind: InstrPow, args: @[instr.args[0], newExponent], res: pow))
+        result.add(Instr(kind: InstrMul, args: @[instr.args[1], pow], res: powFactor))
+        result.add(Instr(kind: InstrMul, args: @[grad, pow], res: gradBase))
+        
+        # d/db e^(ln(a) * b) = e^(ln(a) * b) * ln(a) = a^b * ln(a)
+        result.add(Instr(kind: InstrLn, args: @[instr.args[0]], res: log))
+        result.add(Instr(kind: InstrMul, args: @[instr.res, log], res: product))
+        result.add(Instr(kind: InstrMul, args: @[grad, product], res: gradExponent))
+        
+        gradArgs = @[gradBase, gradExponent]
       of InstrToScalar, InstrToIndex: gradArgs = @[RegId(0)]
       else: discard
     
