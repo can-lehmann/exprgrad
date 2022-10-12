@@ -711,10 +711,12 @@ proc lock*(fun: Fun) =
   fun.locked = true
 
 proc param*(shape: openArray[int],
-            initRange: HSlice[float64, float64] = -0.1..0.1): Fun =
+            initRange: HSlice[float64, float64] = -0.1..0.1,
+            name: string = ""): Fun =
   result = Fun(kind: FunParam,
     initRange: initRange,
-    paramShape: newSeq[int](shape.len)
+    paramShape: newSeq[int](shape.len),
+    name: name
   )
   for dim, size in shape:
     result.paramShape[dim] = size

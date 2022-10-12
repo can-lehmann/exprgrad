@@ -17,10 +17,10 @@
 import ../parser, ../dsl
 
 proc dense*(values: Fun, inp, outp: int, hasBias: bool = true): Fun {.layer.} =
-  let weights = param([inp, outp])
+  let weights = param([inp, outp], name="weights")
   result[y, x] ++= values[y, it] * weights[it, x] | (x, y, it)
   if hasBias:
-    let bias = param([outp])
+    let bias = param([outp], name="bias")
     result[y, x] ++= bias[x] | (y, x)
 
 proc relu*(inp: Fun): Fun {.layer.} =
@@ -49,7 +49,7 @@ proc conv2*(images, filters: Fun): Fun {.layer.} =
   ) | (image, y, x, filter, dx, dy, chan)
 
 proc conv2*(images: Fun, chans, w, h, filters: int): Fun =
-  let filters = param([filters, h, w, chans])
+  let filters = param([filters, h, w, chans], name="filters")
   result = conv2(images, filters)
 
 proc max(x, y, z, w: Scalar): Scalar =

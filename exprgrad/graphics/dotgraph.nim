@@ -14,7 +14,7 @@
 
 # Render programs as DOT graphs 
 
-import std/[tables, sets, strutils]
+import std/[tables, sets, strutils, sequtils]
 import ../ir, ../irprint
 
 type
@@ -27,6 +27,8 @@ type
     attrs: seq[(string, string)]
   
   DotGraph = object
+    attrs: seq[(string, string)]
+    
     nodes: seq[Node]
     edges: seq[Edge]
 
@@ -47,6 +49,8 @@ proc formatAttrs(attrs: openArray[(string, string)]): string =
 
 proc `$`(graph: DotGraph): string =
   result = "digraph {"
+  if graph.attrs.len > 0:
+    result &= "\n\tgraph " & graph.attrs.formatAttrs()
   for node in graph.nodes:
     result &= "\n\t" & node.name
     if node.attrs.len > 0:
@@ -59,11 +63,15 @@ proc `$`(graph: DotGraph): string =
     result &= ";"
   result &= "\n}"
 
-proc toDotGraph*(program: Program, target: string): string =
+proc toDotGraph*(program: Program,
+                 target: string,
+                 dpi: int = 200,
+                 fontName: string = "",
+                 background: string = "#f0f0f0"): string =
   program.assertGen("toDotGraph", requires={})
   
   var
-    graph = DotGraph()
+    graph = DotGraph(attrs: @{"dpi": $dpi, "bgcolor": background})
     deps = initTable[TensorId, HashSet[TensorId]]()
     tensors = initHashSet[TensorId]()
   
@@ -91,14 +99,24 @@ proc toDotGraph*(program: Program, target: string): string =
     var label = def.name
     if label.len == 0:
       label = $tensor
-    if def.kind != TensorResult:
-      label = ($def.kind)[len("Tensor")..^1].toLowerAscii() & " " & label
     if def.shape.len > 0:
-      label &= " " & $def.shape
-    graph.nodes.add(Node(name: $tensor, attrs: @{
+      label &= " [" & def.shape.mapIt($it).join(", ") & "]"
+    
+    var attrs = @{
       "label": label,
       "shape": "box"
-    }))
+    }
+    case def.kind:
+      of TensorInput:
+        attrs.add(("penwidth", "4"))
+      of TensorParam:
+        attrs.add(("shape", "parallelogram"))
+      else: discard
+    
+    if fontName.len > 0:
+      attrs.add(("fontname", fontName))
+    
+    graph.nodes.add(Node(name: $tensor, attrs: attrs))
   
   for output, inputs in deps:
     for input in inputs:
