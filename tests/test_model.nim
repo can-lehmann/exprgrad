@@ -14,7 +14,7 @@
 
 # Unit-tests for exprgrad
 
-import std/random
+import std/[random, math]
 import exprgrad, exprgrad/irprint
 import ../tools/test_framework
 
@@ -246,3 +246,65 @@ test "loopBounds":
   let model = compile[float32](res.target("res"))
   check model.call("res") == newTensor([5], @[float32 -1, 0, 1, 1, 0])
 
+test "derive/polynomial":
+  let x = input("x")
+  y*{it} ++= sq(x{it}) + 2.0 * x{it} + 1.0 | it
+  let model = compile[float32](y.backwards().grad(x).target("x^2+2x+1"))
+  
+  block:
+    let x = Tensor.linspace(-8'f32..8'f32, 17)
+    check model.call("x^2+2x+1", {"x": x}) == x * 2.0 + Tensor.new([17], 2'f32)
+
+test "derive/trigonometry":
+  let x = input("x")
+  a*{it} ++= sin(x{it}) | it
+  b*{it} ++= cos(x{it}) | it
+  let model = compile[float32]([
+    a.backwards().grad(x).target("sin"),
+    b.backwards().grad(x).target("cos")
+  ])
+  
+  block:
+    let x = Tensor.linspace(-8'f32..8'f32, 17)
+    check model.call("sin", {"x": x}) == cos(x)
+    check model.call("cos", {"x": x}) == -sin(x)
+
+test "derive/exp":
+  let x = input("x")
+  a*{it} ++= exp(x{it}) | it
+  b*{it} ++= exp(2.0 * x{it}) | it
+  c*{it} ++= pow(x{it}, 3.0) | it
+  d*{it} ++= pow(2.0, x{it}) | it
+  e*{it} ++= pow(x{it}, x{it}) | it
+  
+  let model = compile[float32]([
+    a.backwards().grad(x).target("exp(x)"),
+    b.backwards().grad(x).target("exp(2x)"),
+    c.backwards().grad(x).target("x^3"),
+    d.backwards().grad(x).target("2^x"),
+    e.backwards().grad(x).target("x^x")
+  ])
+  
+  block:
+    let x = Tensor.linspace(-8'f32..8'f32, 17)
+    check model.call("exp(x)", {"x": x}) == exp(x)
+    check model.call("exp(2x)", {"x": x}) == exp(2'f32 * x) * 2.0
+    check model.call("x^3", {"x": x}) == squares(x) * 3.0
+    check model.call("2^x", {"x": x}) == pow(2'f32, x) * ln(2'f32)
+    
+    let
+      x2 = Tensor.linspace(1'f32..8'f32, 5)
+      e = x2.mapIt(pow(it, it) * (ln(it) + 1.0))
+    check sum(squares(model.call("x^x", {"x": x2}) - e)) < 0.01
+
+test "derive/log":
+  let x = input("x")
+  a*{it} ++= ln(x{it}) | it
+  
+  let model = compile[float32]([
+    a.backwards().grad(x).target("ln(x)"),
+  ])
+  
+  block:
+    let x = Tensor.linspace(1'f32..8'f32, 8)
+    check model.call("ln(x)", {"x": x}) == 1'f32 / x

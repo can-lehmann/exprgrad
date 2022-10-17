@@ -14,7 +14,7 @@
 
 # A simple tensor library
 
-import math, sequtils, random
+import std/[math, sequtils, random]
 
 type
   Tensor*[T] = ref TensorObj[T]
@@ -173,6 +173,10 @@ template defineElementwiseUnary(op) =
 
 defineElementwiseUnary(abs)
 defineElementwiseUnary(`-`)
+defineElementwiseUnary(sin)
+defineElementwiseUnary(cos)
+defineElementwiseUnary(exp)
+defineElementwiseUnary(ln)
 
 template defineElementwiseMut(op) =
   proc op*[T](a, b: Tensor[T]) =
@@ -199,6 +203,7 @@ defineScalarOp(`/`)
 defineScalarOp(`div`)
 defineScalarOp(min)
 defineScalarOp(max)
+defineScalarOp(pow)
 
 template defineReduce(name, op, initial) =
   proc name*[T](tensor: Tensor[T]): T =
@@ -357,3 +362,15 @@ proc reshape*[T](tensor: Tensor[T], shape: openArray[int]): Tensor[T] =
   result = allocTensor[T]()
   result.allocShape(targetShape, fillZero = false)
   copyMem(result.data[0].addr, tensor.data[0].addr, result.len * sizeof(T))
+
+template mapIt*[T](tensor: Tensor[T], body: untyped): Tensor[T] =
+  block:
+    var result = newTensor[T](tensor.shape)
+    for it in 0..<tensor.len:
+      result.data[it] = block:
+        let it {.inject.} = tensor.data[it]
+        body
+    result
+
+proc toSeq*[T](tensor: Tensor[T]): seq[T] =
+  result = @(tensor.data.toOpenArray(0, tensor.len - 1))

@@ -454,7 +454,7 @@ proc derive(instrs: seq[Instr],
         result.add(Instr(kind: InstrSub, args: @[instr.args[1], one], res: newExponent))
         result.add(Instr(kind: InstrPow, args: @[instr.args[0], newExponent], res: pow))
         result.add(Instr(kind: InstrMul, args: @[instr.args[1], pow], res: powFactor))
-        result.add(Instr(kind: InstrMul, args: @[grad, pow], res: gradBase))
+        result.add(Instr(kind: InstrMul, args: @[grad, powFactor], res: gradBase))
         
         # d/db e^(ln(a) * b) = e^(ln(a) * b) * ln(a) = a^b * ln(a)
         result.add(Instr(kind: InstrLn, args: @[instr.args[0]], res: log))
@@ -1354,6 +1354,12 @@ proc inferShapes*(program: Program,
   for tensorId in program.params:
     result[tensorId] = program.tensors[tensorId].shape
   for shape in program.targets[target].shapes:
+    for dep in shape.deps:
+      if dep notin result:
+        var name = $dep
+        if program.tensors[dep].name.len > 0:
+          name = "\"" & program.tensors[dep].name & "\" (" & name & ")"
+        raise ShapeError(msg: "Missing shape for tensor " & name & ", maybe you forgot to pass an input to the model?")
     case shape.kind:
       of ShapeNone: discard
       of ShapeRank: result[shape.dest] = newSeq[int](shape.rank)
