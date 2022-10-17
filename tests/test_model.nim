@@ -300,11 +300,24 @@ test "derive/exp":
 test "derive/log":
   let x = input("x")
   a*{it} ++= ln(x{it}) | it
+  b*{it} ++= log10(x{it}) | it
+  c*{it} ++= log2(x{it}) | it
+  d*{it} ++= log(x{it}, 5.0) | it
+  e*{it} ++= log(2.0, x{it}) | it
   
   let model = compile[float32]([
     a.backwards().grad(x).target("ln(x)"),
+    b.backwards().grad(x).target("log10(x)"),
+    c.backwards().grad(x).target("log2(x)"),
+    d.backwards().grad(x).target("log(x,5)"),
+    e.backwards().grad(x).target("log(2,x)")
   ])
   
   block:
     let x = Tensor.linspace(1'f32..8'f32, 8)
     check model.call("ln(x)", {"x": x}) == 1'f32 / x
+    check model.call("log10(x)", {"x": x}) == 1'f32 / (x * ln(10'f32))
+    check model.call("log2(x)", {"x": x}) == 1'f32 / (x * ln(2'f32))
+    check model.call("log(x,5)", {"x": x}) == 1'f32 / (x * ln(5'f32))
+    let e = mapIt(x, -ln(2'f32) / (it * ln(it) * ln(it)))
+    check model.call("log(2,x)", {"x": x}) == e

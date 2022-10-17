@@ -410,10 +410,42 @@ proc derive(instrs: seq[Instr],
         let negGrad = regs.alloc()
         result.add(Instr(kind: InstrNegate, args: @[grad], res: negGrad))
         gradArgs = @[negGrad]
-      of InstrLn:
+      of InstrLn, InstrLog10, InstrLog2:
         let gradX = regs.alloc()
-        result.add(Instr(kind: InstrDiv, args: @[grad, instr.args[0]], res: gradX))
+        
+        let base = case instr.kind:
+          of InstrLn: 1.0
+          of InstrLog10: ln(10.0)
+          of InstrLog2: ln(2.0)
+          else: raise GradientError()
+        
+        var denominator = instr.args[0]
+        if base != 1.0:
+          let factor = regs.alloc()
+          denominator = regs.alloc()
+          result.add(Instr(kind: InstrScalar, scalarLit: base, res: factor))
+          result.add(Instr(kind: InstrMul, args: @[instr.args[0], factor], res: denominator))
+        result.add(Instr(kind: InstrDiv, args: @[grad, denominator], res: gradX))
         gradArgs = @[gradX]
+      of InstrLog:
+        let (gradX, gradY) = (regs.alloc(), regs.alloc())
+        
+        # d/dx log(x, y) = d/dx log(x)/log(y) = 1/(x * log(y))
+        let (logY, mul) = (regs.alloc(), regs.alloc())
+        result.add(Instr(kind: InstrLn, args: @[instr.args[1]], res: logY))
+        result.add(Instr(kind: InstrMul, args: @[instr.args[0], logY], res: mul))
+        result.add(Instr(kind: InstrDiv, args: @[grad, mul], res: gradX))
+        
+        # d/dy log(x, y) = d/dy log(x)*(log(y))^-1 = -log(x) / (log(y)^2 * y)
+        let (logX, logYSq, negLogX, num, den, frac) = (regs.alloc(), regs.alloc(), regs.alloc(), regs.alloc(), regs.alloc(), regs.alloc())
+        result.add(Instr(kind: InstrLn, args: @[instr.args[0]], res: logX))
+        result.add(Instr(kind: InstrNegate, args: @[logX], res: negLogX))
+        result.add(Instr(kind: InstrMul, args: @[logY, logY], res: logYSq))
+        result.add(Instr(kind: InstrMul, args: @[instr.args[1], logYSq], res: den))
+        result.add(Instr(kind: InstrMul, args: @[grad, negLogX], res: num))
+        result.add(Instr(kind: InstrDiv, args: @[num, den], res: gradY))
+        
+        gradArgs = @[gradX, gradY]
       of InstrExp:
         let gradX = regs.alloc()
         result.add(Instr(kind: InstrMul, args: @[grad, instr.res], res: gradX))
