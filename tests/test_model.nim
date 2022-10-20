@@ -18,6 +18,22 @@ import std/[random, math]
 import exprgrad, exprgrad/irprint
 import ../tools/test_framework
 
+test "identity":
+  proc identity(a: Fun): Fun =
+    result{it} ++= a{it} | it
+  let model = compile[float32](input("x").identity().target("y"))
+  block:
+    let x = newTensor([2, 3], @[float32 1, 2, 3, 4, 5, 6])
+    check model.call("y", {"x": x}) == x
+
+test "double":
+  proc double(a: Fun): Fun =
+    result{it} ++= a{it} * 2.0 | it
+  let model = compile[float32](input("x").double().target("y"))
+  block:
+    let x = newTensor([2, 3], @[float32 1, 2, 3, 4, 5, 6])
+    check model.call("y", {"x": x}) == x * 2.0
+
 test "matmul":
   c*[y, x] ++= input("a")[y, it] * input("b")[it, x] | (x, y, it)
   let model = compile[float32](c.target("c"))

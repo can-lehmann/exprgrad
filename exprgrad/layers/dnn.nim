@@ -79,7 +79,7 @@ proc avgpool2*(images: Fun): Fun {.layer.} =
   ) / 4.0 | (image, y, x, chan)
 
 proc upsample2*(images: Fun): Fun {.layer.} =
-  result[image, y, x, chan] ++= images[image, x div 2, y div 2, chan] | (image, y, x, chan)
+  result[image, y, x, chan] ++= images[image, y div 2, x div 2, chan] | (image, y, x, chan)
   result.withShape([
     images.shape[0],
     images.shape[1] * 2,
