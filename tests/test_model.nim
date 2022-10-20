@@ -23,7 +23,7 @@ test "identity":
     result{it} ++= a{it} | it
   let model = compile[float32](input("x").identity().target("y"))
   block:
-    let x = newTensor([2, 3], @[float32 1, 2, 3, 4, 5, 6])
+    let x = Tensor.new([2, 3], @[float32 1, 2, 3, 4, 5, 6])
     check model.call("y", {"x": x}) == x
 
 test "double":
@@ -31,7 +31,7 @@ test "double":
     result{it} ++= a{it} * 2.0 | it
   let model = compile[float32](input("x").double().target("y"))
   block:
-    let x = newTensor([2, 3], @[float32 1, 2, 3, 4, 5, 6])
+    let x = Tensor.new([2, 3], @[float32 1, 2, 3, 4, 5, 6])
     check model.call("y", {"x": x}) == x * 2.0
 
 test "matmul":
@@ -39,8 +39,8 @@ test "matmul":
   let model = compile[float32](c.target("c"))
   block:
     let
-      a = newTensor([2, 3], @[float32 1, 2, 3, 4, 5, 6])
-      b = newTensor([3, 2], @[float32 1, 2, 3, 4, 5, 6])
+      a = Tensor.new([2, 3], @[float32 1, 2, 3, 4, 5, 6])
+      b = Tensor.new([3, 2], @[float32 1, 2, 3, 4, 5, 6])
     check model.call("c", {"a": a, "b": b}) == a * b
 
 test "relu":
@@ -49,8 +49,8 @@ test "relu":
   let model = compile[float32](outp.target("outp"))
   block:
     let
-      inp = newTensor[float32]([2, 3], @[float32 0, -1, 10, -20, 0.1, -0.1])
-      outp = newTensor[float32]([2, 3], @[float32 0, 0, 10, 0, 0.1, 0])
+      inp = Tensor.new([2, 3], @[float32 0, -1, 10, -20, 0.1, -0.1])
+      outp = Tensor.new([2, 3], @[float32 0, 0, 10, 0, 0.1, 0])
     check model.call("outp", {"inp": inp}) == outp
 
 test "meanSquaredError":
@@ -58,22 +58,22 @@ test "meanSquaredError":
   let model = compile[float32](loss.target("loss"))
   block:
     let
-      pred = newTensor[float32]([2, 2], @[float32 1, 2, 3, 4])
-      labels = newTensor[float32]([2, 2], @[float32 4, 3, 2, 1])
+      pred = Tensor.new([2, 2], @[float32 1, 2, 3, 4])
+      labels = Tensor.new([2, 2], @[float32 4, 3, 2, 1])
     check model.call("loss", {
       "pred": pred, "labels": pred
-    }) == newTensor([1], @[float32 0])
+    }) == Tensor.new([1], @[float32 0])
     
     check model.call("loss", {
       "pred": pred, "labels": labels
-    }) == newTensor([1], @[float32 9 + 1 + 1 + 9])
+    }) == Tensor.new([1], @[float32 9 + 1 + 1 + 9])
 
 test "transpose":
   b*[y, x] ++= input("a")[x, y] | (x, y)
   block:
     let
       model = compile[float32](b.target("b"))
-      a = newTensor[float32]([2, 3], @[float32 1, 2, 3, 4, 5, 6])
+      a = Tensor.new([2, 3], @[float32 1, 2, 3, 4, 5, 6])
     
     check model.call("b", {"a": a}) == a.transpose()
 
@@ -84,17 +84,17 @@ test "max":
   
   let model = compile[float32](res.target("z"))
   check model.call("z", {
-    "x": newTensor([3, 2], @[float32 1, 0, 3, 4, -10, 6]),
-    "y": newTensor([3, 2], @[float32 1, 2, -3, 2, 5, 5.5])
-  }) == newTensor([3, 2], @[float32 1, 2, 3, 4, 5, 6])
+    "x": Tensor.new([3, 2], @[float32 1, 0, 3, 4, -10, 6]),
+    "y": Tensor.new([3, 2], @[float32 1, 2, -3, 2, 5, 5.5])
+  }) == Tensor.new([3, 2], @[float32 1, 2, 3, 4, 5, 6])
 
 test "conv1":
   res*[x] ++= input("image")[x + dx] * input("filter")[dx] | (x, dx)
   let model = compile[float32](res.target("res"))
   check model.call("res", {
-    "image": newTensor([7], @[float32 1, 2, 3, 2, 1, 0, -1]),
-    "filter": newTensor([3], @[float32 1, 2, 3])
-  }) == newTensor([5], @[float32 14, 14, 10, 4, -2])
+    "image": Tensor.new([7], @[float32 1, 2, 3, 2, 1, 0, -1]),
+    "filter": Tensor.new([3], @[float32 1, 2, 3])
+  }) == Tensor.new([5], @[float32 14, 14, 10, 4, -2])
 
 test "blur":
   res*[x] ++= (
@@ -103,8 +103,8 @@ test "blur":
   ) | (x in 0..<res.shape[0]) # TODO: Infer loop bounds
   let model = compile[float32](res.target("res"))
   check model.call("res", {
-    "image": newTensor([7], @[float32 1, 2, 3, 2, 1, 0, -1]),
-  }) == newTensor([5], @[float32 2, float32(7/3), 2, 1, 0])
+    "image": Tensor.new([7], @[float32 1, 2, 3, 2, 1, 0, -1]),
+  }) == Tensor.new([5], @[float32 2, float32(7/3), 2, 1, 0])
 
 test "blurCenter":
   let image = input("image")
@@ -113,8 +113,8 @@ test "blurCenter":
   ) | (x in 1..<(image.shape[0] - 1)) # TODO: Infer loop bounds
   let model = compile[float32](res.target("res"))
   check model.call("res", {
-    "image": newTensor([7], @[float32 1, 2, 3, 2, 1, 0, -1]),
-  }) == newTensor([5], @[float32 2, float32(7/3), 2, 1, 0])
+    "image": Tensor.new([7], @[float32 1, 2, 3, 2, 1, 0, -1]),
+  }) == Tensor.new([5], @[float32 2, float32(7/3), 2, 1, 0])
 
 test "blurOffset":
   let image = input("image")
@@ -124,21 +124,21 @@ test "blurOffset":
   res.withShape([image.shape[0]])
   let model = compile[float32](res.target("res"))
   check model.call("res", {
-    "image": newTensor([7], @[float32 1, 2, 3, 2, 1, 0, -1]),
-  }) == newTensor([7], @[float32 0, 2, float32(7/3), 2, 1, 0, 0])
+    "image": Tensor.new([7], @[float32 1, 2, 3, 2, 1, 0, -1]),
+  }) == Tensor.new([7], @[float32 0, 2, float32(7/3), 2, 1, 0, 0])
 
 test "singleWrite":
   res*[0] ++= 10.0
   
   let model = compile[float64](res.target("y"))
-  check model.call("y") == newTensor([1], @[float64 10])
+  check model.call("y") == Tensor.new([1], @[float64 10])
 
 test "shape":
   res*{it} ++= 1.0 | it
   res.withShape(3, 2, 1)
   
   let model = compile[float64](res.target("y"))
-  check model.call("y") == newTensor([3, 2, 1], 1.0)
+  check model.call("y") == Tensor.new([3, 2, 1], 1.0)
 
 test "dimensions":
   let inp = input("x")
@@ -150,8 +150,8 @@ test "dimensions":
   res.withShape(5)
   
   let model = compile[float64](res.target("y"))
-  check model.call("y", {"x": newTensor([1, 2, 3, 4], 0.0)}) == newTensor([5], @[float64 1, 3, 4, 4, 24])
-  check model.call("y", {"x": newTensor([2, 3], 0.0)}) == newTensor([5], @[float64 2, 2, 3, 2, 6])
+  check model.call("y", {"x": Tensor.new([1, 2, 3, 4], 0.0)}) == Tensor.new([5], @[float64 1, 3, 4, 4, 24])
+  check model.call("y", {"x": Tensor.new([2, 3], 0.0)}) == Tensor.new([5], @[float64 2, 2, 3, 2, 6])
 
 test "extern":
   proc `*`(inp: Fun, factor: float64): Fun =
@@ -160,7 +160,7 @@ test "extern":
   proc testWithFactor(factor: float64) =
     let
       model = compile[float64](target(input("x") * factor, "y"))
-      x = newTensor[float64]([2, 3], @[float64 1, 2, 3, 4, 5, 6])
+      x = Tensor.new([2, 3], @[float64 1, 2, 3, 4, 5, 6])
     check model.call("y", {"x": x}) == x * factor
   
   for it in -2..2:
@@ -185,8 +185,8 @@ test "xor":
   let model = compile[float32](net)
   
   let
-    trainX = newTensor([4, 2], @[float32 0, 0, 0, 1, 1, 0, 1, 1])
-    trainY = newTensor([4, 1], @[float32 0, 1, 1, 0])
+    trainX = Tensor.new([4, 2], @[float32 0, 0, 0, 1, 1, 0, 1, 1])
+    trainY = Tensor.new([4, 1], @[float32 0, 1, 1, 0])
   
   for epoch in 0..<1000:
     model.apply("train", {"x": trainX, "y": trainY})
@@ -208,7 +208,7 @@ test "customGrad":
     model = compile[float32](graph)
   
   block:
-    let tensor = newTensor[float32]([2, 2], @[float32 1, 2, 3, 4])
+    let tensor = Tensor.new([2, 2], @[float32 1, 2, 3, 4])
     check model.call("identity", {"inp": tensor}) == tensor
     check model.call("grad", {"inp": tensor}) == tensor * 2
 
@@ -220,8 +220,8 @@ test "dynamicAst":
     result{it} ++= prod | it
     result.copyShape(fun)
   
-  let x = newTensor([3, 2], @[float32 1, 2, 3, 4, 5, 6])
-  var expectedY = newTensor[float32]([3, 2], 1)
+  let x = Tensor.new([3, 2], @[float32 1, 2, 3, 4, 5, 6])
+  var expectedY = Tensor.new([3, 2], 1'f32)
   for n in 0..<2:
     let
       model = compile[float32](input("x").elementwisePow(n).target("y"))
@@ -238,7 +238,7 @@ test "array":
   res.withShape(3)
   
   let model = compile[float32](res.target("y"))
-  check model.call("y", []) == newTensor([3], @[float32 4, 5, 6])
+  check model.call("y", []) == Tensor.new([3], @[float32 4, 5, 6])
 
 test "nestedArray":
   res*[y, x] ++= (
@@ -252,7 +252,7 @@ test "nestedArray":
   res.withShape(3, 3)
   
   let model = compile[float32](res.target("y"))
-  check model.call("y", []) == newTensor([3, 3], @[float32 1, 2, 3, 4, 5, 6, 7, 8, 9])
+  check model.call("y", []) == Tensor.new([3, 3], @[float32 1, 2, 3, 4, 5, 6, 7, 8, 9])
 
 test "loopBounds":
   res*[x] ++= 1.0 | (x in 2..<4)
@@ -260,7 +260,7 @@ test "loopBounds":
   res[x] ++= -2.0 | (x in 1..<1)
   res.withShape(5)
   let model = compile[float32](res.target("res"))
-  check model.call("res") == newTensor([5], @[float32 -1, 0, 1, 1, 0])
+  check model.call("res") == Tensor.new([5], @[float32 -1, 0, 1, 1, 0])
 
 test "derive/polynomial":
   let x = input("x")
