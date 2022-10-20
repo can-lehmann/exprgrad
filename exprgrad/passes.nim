@@ -966,7 +966,8 @@ proc unfoldLoopBounds*(program: Program) =
     requires={StageFolded},
     preserves={
       StageTensors, StageGenerated, StageBounds,
-      StageTensorInstrs, StageShapes, StageSortedShapes
+      StageTensorInstrs, StageShapes, StageSortedShapes,
+      StageStaticShapes
     }
   )
   
@@ -1508,42 +1509,129 @@ proc inferStaticShapes*(program: Program) =
         if id in shapes:
           assert tensor.shape == shapes[id]
 
-proc inlineStaticShapes(instrs: var seq[Instr], tensors: seq[TensorDef]) =
-  for instr in instrs.mitems:
-    var size = -1
-    if instr.tensor != TensorId(0) and
-       tensors[instr.tensor].shape.len > 0:
-      let shape = tensors[instr.tensor].shape
-      case instr.kind:
-        of InstrLen: size = shape.prod()
-        of InstrShape:
-          if instr.dim < 0:
-            size = shape[shape.len + instr.dim]
-          else:
-            size = shape[instr.dim]
-        of InstrShapeLen: size = shape.len
-        else: discard
-    if size >= 0:
-      instr = Instr(kind: InstrIndex, indexLit: size, res: instr.res)
+type ConstantValue = object
+  isConstant: bool
+  case kind: TypeKind:
+    of TypeScalar: scalar: float64
+    of TypeIndex: index: int
+    of TypeBoolean: boolean: bool
+    of TypeArray: discard
 
-proc inlineStaticShapes*(program: Program) =
-  program.assertPass("inlineStaticShapes",
+proc init(_: typedesc[ConstantValue], scalar: float64): ConstantValue =
+  result = ConstantValue(isConstant: true, kind: TypeScalar, scalar: scalar)
+
+proc init(_: typedesc[ConstantValue], index: int): ConstantValue =
+  result = ConstantValue(isConstant: true, kind: TypeIndex, index: index)
+
+proc init(_: typedesc[ConstantValue], boolean: bool): ConstantValue =
+  result = ConstantValue(isConstant: true, kind: TypeBoolean, boolean: boolean)
+
+proc propagateConstants(instrs: var seq[Instr],
+                        values: var seq[ConstantValue],
+                        tensors: seq[TensorDef]) =
+  for instr in instrs.mitems:
+    if instr.body.len > 0:
+      instr.body.propagateConstants(values, tensors)
+    
+    var res = ConstantValue()
+    
+    template arg(index: int): ConstantValue = values[instr.args[index]]
+    
+    template binop(op: untyped,
+                   supportsIndex: static[bool] = true,
+                   supportsScalar: static[bool] = true,
+                   supportsBoolean: static[bool] = false) =
+      if arg(0).isConstant and arg(1).isConstant:
+        case arg(0).kind:
+          of TypeIndex:
+            when supportsIndex:
+              res = ConstantValue.init(op(arg(0).index, arg(1).index))
+            else:
+              raise TypeError()
+          of TypeScalar:
+            when supportsScalar:
+              res = ConstantValue.init(op(arg(0).scalar, arg(1).scalar))
+            else:
+              raise TypeError()
+          of TypeBoolean:
+            when supportsBoolean:
+              res = ConstantValue.init(op(arg(0).boolean, arg(1).boolean))
+            else:
+              raise TypeError()
+          else: discard
+    
+    case instr.kind:
+      of InstrScalar: res = ConstantValue.init(instr.scalarLit)
+      of InstrIndex: res = ConstantValue.init(instr.indexLit)
+      of InstrBoolean: res = ConstantValue.init(instr.booleanLit)
+      of InstrAdd: binop(`+`)
+      of InstrSub: binop(`-`)
+      of InstrMul: binop(`*`)
+      of InstrDiv: binop(`/`, supportsIndex=false)
+      of InstrIndexDiv: binop(`div`, supportsScalar=false)
+      of InstrMod: binop(`mod`)
+      of InstrEq: binop(`==`, supportsBoolean=true)
+      of InstrLt: binop(`<`)
+      of InstrLe: binop(`<=`)
+      of InstrAnd: binop(`and`, supportsBoolean=true, supportsIndex=false, supportsScalar=false)
+      of InstrOr: binop(`or`, supportsBoolean=true, supportsIndex=false, supportsScalar=false)
+      of InstrSelect:
+        if arg(0).isConstant:
+          if arg(0).boolean:
+            res = arg(1)
+          else:
+            res = arg(2)
+      of InstrLen, InstrShape, InstrShapeLen:
+        let shape = tensors[instr.tensor].shape
+        if shape.len > 0:
+          case instr.kind:
+            of InstrLen:
+              var prod = 1
+              for dim in shape:
+                if dim >= 0:
+                  prod *= dim
+                else:
+                  prod = -1
+                  break
+              if prod >= 0:
+                res = ConstantValue.init(prod)
+            of InstrShape:
+              let dim =
+                if instr.dim < 0:
+                  shape[shape.len + instr.dim]
+                else:
+                  shape[instr.dim]
+              if dim >= 0:
+                res = ConstantValue.init(dim)
+            of InstrShapeLen: res = ConstantValue.init(shape.len)
+            else: raise CompilerError()
+      else: discard
+    
+    if instr.res != RegId(0):
+      if res.isConstant:
+        case res.kind:
+          of TypeIndex: instr = Instr(kind: InstrIndex, indexLit: res.index, res: instr.res)
+          of TypeScalar: instr = Instr(kind: InstrScalar, scalarLit: res.scalar, res: instr.res)
+          of TypeBoolean: instr = Instr(kind: InstrBoolean, booleanLit: res.boolean, res: instr.res)
+          else: discard
+      values[instr.res] = res
+
+proc propagateConstants*(program: Program) =
+  ## Inline static shapes and propagate constants
+  program.assertPass("propagateConstants",
     produces={},
-    requires={StageStaticShapes, StageBounds, StageTensorInstrs},
+    requires={StageStaticShapes, StageTensorInstrs, StageLoops, StageConditions},
     preserves={
-      StageTensors, StageFolded, StageShapes, StageSortedShapes,
-      StageGenerated, StageTyped, StageBounds, StageTensorInstrs
+      StageTensors, StageShapes, StageSortedShapes,
+      StageGenerated, StageTensorInstrs, StageConditions, StageLoops
     }
   )
   
   for name, target in program.targets:
     for kernel in target.kernels:
-      kernel.setup.inlineStaticShapes(program.tensors)
-      for loop in kernel.loops.mitems:
-        loop.start.setup.inlineStaticShapes(program.tensors)
-        loop.stop.setup.inlineStaticShapes(program.tensors)
-        loop.cache.inlineStaticShapes(program.tensors)
-      kernel.expr.instrs.inlineStaticShapes(program.tensors)
+      var values = newSeq[ConstantValue](kernel.regs.len)
+      kernel.setup.propagateConstants(values, program.tensors)
+      kernel.expr.instrs.propagateConstants(values, program.tensors)
 
 proc makeTensorLookups*(program: Program) =
   program.assertPass("makeTensorLookups",
@@ -1820,7 +1908,7 @@ proc inlineConditions*(program: Program) =
     produces={StageConditions},
     preserves={
       StageBounds, StageGenerated, StageTensors, StageShapes,
-      StageSortedShapes, StageTensorInstrs
+      StageSortedShapes, StageStaticShapes, StageTensorInstrs
     }
   )
   
@@ -2342,7 +2430,8 @@ proc inlineLoops*(program: Program) =
     produces={StageLoops},
     preserves={
       StageGenerated, StageTensors, StageShapes,
-      StageSortedShapes, StageTensorInstrs, StageConditions
+      StageSortedShapes, StageStaticShapes,
+      StageTensorInstrs, StageConditions
     }
   )
   
@@ -2404,7 +2493,7 @@ proc liftInvariants(instrs: var seq[Instr],
 proc liftInvariants*(program: Program) =
   program.assertPass("liftInvariants",
     produces={},
-    requires={StageTensorInstrs},
+    requires={StageTensorInstrs, StageLoops, StageConditions},
     preserves={
       StageGenerated, StageTensors, StageShapes,
       StageSortedShapes, StageBounds,
@@ -2453,17 +2542,14 @@ proc collectClosures*(program: Program) =
   program.assertPass("collectClosures",
     produces={},
     requires={StageLoops},
-    preserves={
-      StageGenerated, StageTensors, StageShapes,
-      StageSortedShapes, StageBounds,
-      StageTensorInstrs, StageLoops, StageConditions
-    }
+    preserves=ALL_STAGES
   )
   
   for name, target in program.targets:
     for kernel in target.kernels:
       var regs = newSeq[int](kernel.regs.len)
       discard kernel.setup.collectClosures(regs, 0)
+
 
 proc extractClosure(regs: seq[bool], closure: ParallelClosure): seq[bool] =
   result = newSeq[bool](regs.len)
