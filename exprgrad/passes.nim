@@ -2365,22 +2365,15 @@ proc liftInvariants(instrs: var seq[Instr],
     let instr = instrs[it]
     if instr.body.len > 0:
       levels.add(@[])
+      
       var bodyMinLevel = minLevel
-      case instr.kind:
-        of InstrLoop:
-          regs[instr.loopIter] = levels.len
-        of InstrThreads:
-          regs[instr.threadsBegin] = levels.len
-          regs[instr.threadsEnd] = levels.len
-          bodyMinLevel = levels.len
-        of InstrGpu:
-          for index in instr.gpuIndices:
-            regs[index.local] = levels.len
-            regs[index.group] = levels.len
-          bodyMinLevel = levels.len
-        of InstrIf:
-          bodyMinLevel = levels.len # TODO: Only for InstrRead, InstrArrayRead, ...
-        else: discard
+      if instr.kind in {InstrThreads, InstrGpu, InstrIf}:
+        # TODO: In case of InstrIf only for InstrRead, InstrArrayRead, ...
+        bodyMinLevel = levels.len
+      
+      for reg in instr.definedRegs():
+        regs[reg] = levels.len
+      
       instrs[it].body.liftInvariants(regs, levels, bodyMinLevel)
       let level = levels.pop()
       instrs.insert(level, it)
@@ -2430,18 +2423,8 @@ proc collectClosures(instrs: var seq[Instr], regs: var seq[int], level: int): Ha
   for instr in instrs.mitems:
     var used = instr.body.collectClosures(regs, level + 1)
     
-    # TODO: Refactor using iterator which returns all registers defined by the instruction
-    case instr.kind:
-      of InstrLoop:
-        regs[instr.loopIter] = level + 1
-      of InstrThreads:
-        regs[instr.threadsBegin] = level + 1
-        regs[instr.threadsEnd] = level + 1
-      of InstrGpu:
-        for index in instr.gpuIndices:
-          regs[index.local] = level + 1
-          regs[index.group] = level + 1
-      else: discard
+    for reg in instr.definedRegs():
+      regs[reg] = level + 1
     
     if instr.kind in {InstrThreads, InstrGpu}:
       var closure = ParallelClosure()
@@ -2495,24 +2478,16 @@ proc validate(instrs: seq[Instr], regs: var seq[bool]) =
       if not regs[arg]:
         raise ValidationError(msg: $arg & " is not defined")
     
-    case instr.kind:
-      of InstrIf:
-        instr.body.validate(regs)
-      of InstrLoop:
-        regs[instr.loopIter] = true
-        instr.body.validate(regs)
-      of InstrThreads:
-        var closure = regs.extractClosure(instr.threadsClosure)
-        closure[instr.threadsBegin] = true
-        closure[instr.threadsEnd] = true
-        instr.body.validate(closure)
-      of InstrGpu:
-        var closure = regs.extractClosure(instr.gpuClosure)
-        for index in instr.gpuIndices:
-          closure[index.local] = true
-          closure[index.group] = true
-        instr.body.validate(closure)
-      else: discard
+    if instr.body.len > 0:
+      var closure = case instr.kind:
+        of InstrThreads: regs.extractClosure(instr.threadsClosure)
+        of InstrGpu: regs.extractClosure(instr.gpuClosure)
+        else: regs
+      
+      for reg in instr.definedRegs():
+        closure[reg] = true
+      
+      instr.body.validate(closure)
     
     if instr.res != RegId(0):
       regs[instr.res] = true

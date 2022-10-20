@@ -359,6 +359,20 @@ proc hash*(instr: Instr): Hash =
     else: discard
   result = !$result
 
+iterator definedRegs*(instr: Instr): RegId =
+  ## Yields all registers the instruction defines before executing its body.
+  case instr.kind:
+    of InstrLoop:
+      yield instr.loopIter
+    of InstrThreads:
+      yield instr.threadsBegin
+      yield instr.threadsEnd
+    of InstrGpu:
+      for index in instr.gpuIndices:
+        yield index.local
+        yield index.group
+    else: discard
+
 proc `==`*(a, b: ShapeConstraint): bool =
   if a.kind == b.kind and a.dest == b.dest:
     case a.kind:
