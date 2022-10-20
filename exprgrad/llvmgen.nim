@@ -86,7 +86,7 @@ proc taskProcSignature(): TypeRef =
 
 proc runThreadsSignature(builtin: Builtin): TypeRef =
   functionType(void_type(), [
-    modelPtrType(), nimIntType(), nimIntType(), voidPtrType(),
+    modelPtrType(), nimIntType(), nimIntType(), nimIntType(), voidPtrType(),
     taskProcSignature().pointer_type(0)
   ])
 
@@ -415,7 +415,7 @@ proc toLlvm(instrs: seq[Instr], ctx: Context) =
         
         builder.position_builder_at_end(currentBlock)
         discard builder.buildCall2(ctx.builtin.runThreadsSignature(), ctx.builtin.runThreads, [
-          ctx.fn.get_param(0), ctx[instr.args[0]], ctx[instr.args[1]],
+          ctx.fn.get_param(0), ctx[instr.args[0]], ctx[instr.args[1]], ctx[instr.args[2]],
           builder.build_bit_cast(closure, voidPtrType(), "data"),
           task
         ], cstring(""))

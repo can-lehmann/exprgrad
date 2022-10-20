@@ -109,7 +109,8 @@ proc stringify(instr: Instr, regs: var seq[string], level: int): string =
       result &= ":\n" & instr.body.stringify(regs, level + 1)
     of InstrThreads:
       result &= "threads (" & $instr.threadsBegin & ", " & $instr.threadsEnd & ") in "
-      result &= regs[instr.args[0]] & " to " & regs[instr.args[1]] & ":\n"
+      result &= regs[instr.args[0]] & " to " & regs[instr.args[1]]
+      result &= " min_size " & regs[instr.args[2]] & ":\n"
       result &= instr.body.stringify(regs, level + 1)
     of InstrGpu:
       result &= "gpu"

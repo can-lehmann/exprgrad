@@ -106,21 +106,28 @@ when TARGET_SUPPORTS_THREADS:
   
   {.push cdecl.}
   proc builtinRunThreads[T](model: ModelPtr[T],
-                            start, stop: int,
+                            start, stop, minCount: int,
                             data: pointer,
                             fn: TaskProc) =
     let size = stop - start
-    var offset = start
-    for thread in 0..<threadPool.len:
-      var threadSize = size div threadPool.len
-      if thread < size mod threadPool.len:
-        threadSize += 1
-      threadPool.enqueue(thread, Task(
-        fn: fn, data: data, model: model,
-        a: offset, b: offset + threadSize
-      ))
-      offset += threadSize
-    assert offset == stop
+    var
+      threadCount = threadPool.len
+      offset = start
+    if minCount > 0:
+      threadCount = threadCount.min(size div minCount).max(1)
+    if threadCount == 1 and not defined(alwaysUseThreadpool):
+      fn(model, start, stop, data)
+    else:
+      for thread in 0..<threadCount:
+        var threadSize = size div threadCount
+        if thread < size mod threadCount:
+          threadSize += 1
+        threadPool.enqueue(thread, Task(
+          fn: fn, data: data, model: model,
+          a: offset, b: offset + threadSize
+        ))
+        offset += threadSize
+      assert offset == stop
   
   proc builtinJoinThreads[T](model: ModelPtr[T]) =
     threadPool.join()
@@ -130,7 +137,7 @@ else:
   
   {.push cdecl.}
   proc builtinRunThreads[T](model: ModelPtr[T],
-                            start, stop: int,
+                            start, stop, minCount: int,
                             data: pointer,
                             fn: TaskProc) = discard
   proc builtinJoinThreads[T](model: ModelPtr[T]) = discard
@@ -221,7 +228,7 @@ proc newModel[T](source: Program,
     result.gpu = newGpuModel[T](program, gpuCtx, gpuSources)
 
 proc newModel*[T](source: Program, gpuCtx: GpuContext): Model[T] =
-  bind `==`
+  bind `==`, newTensor
   
   let program = source.clone()
   program.compile()
@@ -264,6 +271,7 @@ proc compile*[T](graphs: varargs[Fun], gpu: GpuContext = nil): Model[T] =
   result = newModel[T](source, gpu)
 
 proc allocShapes[T](cpu: CpuModel[T], model: Model[T], target: Target, shapes: Table[ir.TensorId, seq[int]]) =
+  bind newTensor
   for tensorId, shape in shapes.pairs:
     let
       tensorDef = model.program.tensors[tensorId]

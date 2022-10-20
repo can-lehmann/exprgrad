@@ -2110,7 +2110,85 @@ proc cacheTensors*(program: Program) =
     for kernel in target.kernels:
       kernel.cacheTensors(target.compileTarget)
 
+proc flattenTree(reg: RegId, values: Table[RegId, Instr], regs: var seq[Register]): Expr =
+  if reg in values:
+    var instr = values[reg]
+    for arg in instr.args.mitems:
+      let argExpr = arg.flattenTree(values, regs)
+      if argExpr.res == RegId(0):
+        return Expr()
+      result.instrs.add(argExpr.instrs)
+      arg = argExpr.res
+    instr.res = regs.alloc()
+    result.res = instr.res
+    result.instrs.add(instr)
+
+proc estimateWork(instrs: seq[Instr],
+                  values: var Table[RegId, Instr],
+                  regs: var seq[Register]): Expr =
+  ## Estimate the time executing `instrs` will take.
+  ## Used to select an optimal number of threads to use to execute a given kernel.
+  ## Sequential statements compose with addition, loops multiply work.
+  
+  result.res = regs.alloc()
+  result.instrs.add(Instr(kind: InstrIndex, indexLit: 1, res: result.res))
+  
+  for instr in instrs:
+    var instrWork = RegId(0)
+    case instr.kind:
+      of InstrLoop, InstrThreads:
+        var body = instr.body.estimateWork(values, regs)
+        result.instrs.add(body.instrs)
+        
+        let
+          a = instr.args[0].flattenTree(values, regs)
+          b = instr.args[1].flattenTree(values, regs)
+        
+        if a.res != RegId(0) and b.res != RegId(0):
+          result.instrs.add(a.instrs)
+          result.instrs.add(b.instrs)
+          let (size, product) = (regs.alloc(), regs.alloc())
+          result.instrs.add(Instr(kind: InstrSub,
+            args: @[b.res, a.res],
+            res: size
+          ))
+          result.instrs.add(Instr(kind: InstrMul,
+            args: @[size, body.res],
+            res: product
+          ))
+          instrWork = product
+        else:
+          echo "Warning: Unable to estimate work for loop" # TODO: Actual logging framework?
+          instrWork = body.res
+      of InstrIf:
+        var body = instr.body.estimateWork(values, regs)
+        result.instrs.add(body.instrs)
+        instrWork = body.res
+      else: discard
+    
+    if instrWork != RegId(0):
+      let sum = regs.alloc()
+      result.instrs.add(Instr(kind: InstrAdd,
+        args: @[result.res, instrWork],
+        res: sum
+      ))
+      result.res = sum
+    
+    if instr.res != RegId(0):
+      var hasArgs = true
+      for arg in instr.args:
+        if arg notin values:
+          hasArgs = false
+          break
+      if hasArgs:
+        values[instr.res] = instr
+
+proc estimateWork(instrs: seq[Instr], regs: var seq[Register]): Expr =
+  var values = initTable[RegId, Instr]()
+  result = estimateWork(instrs, values, regs)
+
 proc inlineLoop(kernel: Kernel, compileTarget: CompileTarget) =
+  ## Inline the innermost loop of the kernel into `kernel.expr`.
   let loop = kernel.loops.pop()
   if loop.cache.len > 0:
     if compileTarget == CompileGpu:
@@ -2123,17 +2201,28 @@ proc inlineLoop(kernel: Kernel, compileTarget: CompileTarget) =
       of CompileCpu:
         raise StageError(msg: "Parallel loops are not supported by CPU target")
       of CompileThreads:
-        let (rangeBegin, rangeEnd) = (kernel.regs.alloc(), kernel.regs.alloc())
-        kernel.expr.instrs = @[Instr(kind: InstrThreads,
-          args: @[loop.start.onlyRegister, loop.stop.onlyRegister],
-          threadsBegin: rangeBegin, threadsEnd: rangeEnd,
-          body: @[Instr(kind: InstrLoop,
-            args: @[rangeBegin, rangeEnd],
-            loopIter: loop.iter,
-            loopStep: 1,
-            body: kernel.expr.instrs
-          )]
-        )]
+        const MIN_WORK_PER_THREAD = 1 shl 24 # TODO: Schedule Parameter
+        
+        let
+          work = estimateWork(kernel.expr.instrs, kernel.regs)
+          (minWork, minSize) = (kernel.regs.alloc(), kernel.regs.alloc())
+          (rangeBegin, rangeEnd) = (kernel.regs.alloc(), kernel.regs.alloc())
+        
+        kernel.expr.instrs = work.instrs & @[
+          Instr(kind: InstrIndex, indexLit: MIN_WORK_PER_THREAD, res: minWork),
+          Instr(kind: InstrIndexDiv, args: @[minWork, work.res], res: minSize),
+          Instr(kind: InstrThreads,
+            args: @[loop.start.onlyRegister, loop.stop.onlyRegister, minSize],
+            threadsBegin: rangeBegin,
+            threadsEnd: rangeEnd,
+            body: @[Instr(kind: InstrLoop,
+              args: @[rangeBegin, rangeEnd],
+              loopIter: loop.iter,
+              loopStep: 1,
+              body: kernel.expr.instrs
+            )]
+          )
+        ]
       of CompileGpu:
         var
           instr = Instr(kind: InstrGpu,
@@ -2268,9 +2357,9 @@ proc inlineLoops*(program: Program) =
       kernel.expr = Expr()
 
 proc liftInvariants(instrs: var seq[Instr],
-                     regs: var seq[int],
-                     levels: var seq[seq[Instr]],
-                     minLevel: int) =
+                    regs: var seq[int],
+                    levels: var seq[seq[Instr]],
+                    minLevel: int) =
   var it = 0
   while it < instrs.len:
     let instr = instrs[it]

@@ -13,7 +13,7 @@
 # limitations under the License.
 
 
-import std/[os, sugar, times]
+import std/[os, sugar, times, monotimes]
 import exprgrad, exprgrad/[io/idxformat, io/ppmformat, layers/base, layers/dnn, graphics/dotgraph, io/serialize]
 
 proc loadMnist[T](path: string):
@@ -27,6 +27,12 @@ proc loadMnist[T](path: string):
   result.testY = loadIdx[uint8](testYPath).oneHot(10).convert(T)
   result.trainX = loadIdx[uint8](trainXPath).convert(T) / T(255)
   result.trainY = loadIdx[uint8](trainYPath).oneHot(10).convert(T)
+
+template measureTime(name: string, body: untyped) =
+  let start = getMonoTime()
+  body
+  let delta = getMonoTime() - start
+  echo name, ": ", delta
 
 let (trainX, trainY, testX, testY) = loadMnist[float32]("data")
 
@@ -58,13 +64,11 @@ echo testY.shape
 
 var epoch = 0
 while true:
-  let
-    start = now()
-    testLoss = model.call("loss", {"x": testX, "y": testY})
-    stop = now()
-  echo stop - start
+  measureTime "loss":
+    let testLoss = model.call("loss", {"x": testX, "y": testY})
   echo "Epoch: ", epoch, " Test Loss: ", testLoss
-  model.fit("fit", {"x": trainX, "y": trainY})
+  measureTime "fit":
+    model.fit("fit", {"x": trainX, "y": trainY})
   model.save("model.bin")
   epoch += 1
 
