@@ -20,11 +20,11 @@ proc matmul(a, b: Fun): Fun =
 let model = compile[float32](matmul(input("a"), input("b")).target("matmul"))
 
 let
-  a = new_tensor([3, 2], @[float32 1, 2, 3, 4, 5, 6])
-  b = new_tensor([2, 3], @[float32 1, 2, 3, 4, 5, 6])
-  c_expected = a * b
-  c_model = model.call("matmul", {"a": a, "b": b})
+  a = Tensor.new([3, 2], @[float32 1, 2, 3, 4, 5, 6])
+  b = Tensor.new([2, 3], @[float32 1, 2, 3, 4, 5, 6])
+  expected = a * b
+  computed = model.call("matmul", {"a": a, "b": b})
 
-echo c_expected
-echo c_model
-echo c_model == c_expected
+echo expected
+echo computed
+echo computed == expected

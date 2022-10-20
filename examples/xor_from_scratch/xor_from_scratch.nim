@@ -19,12 +19,12 @@ randomize(10)
 # Layer 1
 hidden*[y, x] ++= input("x")[y, it] * param([2, 4])[it, x] | (y, x, it)
 hidden[y, x] ++= param([4])[x] | (y, x)
-hidden_relu*{it} ++= select(hidden{it} <= 0.0, 0.1 * hidden{it}, hidden{it}) | it
+hiddenRelu*{it} ++= select(hidden{it} <= 0.0, 0.1 * hidden{it}, hidden{it}) | it
 # Layer 2
-output*[y, x] ++= hidden_relu[y, it] * param([4, 1])[it, x] | (y, x, it)
+output*[y, x] ++= hiddenRelu[y, it] * param([4, 1])[it, x] | (y, x, it)
 output[y, x] ++= param([1])[x] | (y, x)
-output_sigmoid*{it} ++= 1.0 / (1.0 + exp(-output{it})) | it
-let pred = output_sigmoid.target("predict")
+outputSigmoid*{it} ++= 1.0 / (1.0 + exp(-output{it})) | it
+let pred = outputSigmoid.target("predict")
 loss*[0] ++= sq(pred{it} - input("y"){it}) | it # Loss
 
 proc optim(param: var Fun, grad: Fun) =
@@ -35,10 +35,10 @@ let net = loss.target("loss").backprop(optim).target("train") # Train
 let model = compile[float32](net)
 
 let
-  train_x = new_tensor([4, 2], @[float32 0, 0, 0, 1, 1, 0, 1, 1])
-  train_y = new_tensor([4, 1], @[float32 0, 1, 1, 0])
+  trainX = Tensor.new([4, 2], @[float32 0, 0, 0, 1, 1, 0, 1, 1])
+  trainY = Tensor.new([4, 1], @[float32 0, 1, 1, 0])
 
 for epoch in 0..<5000:
-  model.apply("train", {"x": train_x, "y": train_y})
+  model.apply("train", {"x": trainX, "y": trainY})
 
-echo model.call("predict", {"x": train_x})
+echo model.call("predict", {"x": trainX})

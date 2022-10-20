@@ -16,55 +16,55 @@
 import std/[os, sugar, times]
 import exprgrad, exprgrad/[io/idxformat, io/ppmformat, layers/base, layers/dnn, graphics/dotgraph, io/serialize]
 
-proc load_mnist[T](path: string):
-    tuple[train_x, train_y, test_x, test_y: Tensor[T]] =
+proc loadMnist[T](path: string):
+    tuple[trainX, trainY, testX, testY: Tensor[T]] =
   let
-    test_x_path = path / "t10k-images-idx3-ubyte"
-    test_y_path = path / "t10k-labels-idx1-ubyte"
-    train_x_path = path / "train-images-idx3-ubyte"
-    train_y_path = path / "train-labels-idx1-ubyte"
-  result.test_x = load_idx[uint8](test_x_path).convert(T) / T(255)
-  result.test_y = load_idx[uint8](test_y_path).one_hot(10).convert(T)
-  result.train_x = load_idx[uint8](train_x_path).convert(T) / T(255)
-  result.train_y = load_idx[uint8](train_y_path).one_hot(10).convert(T)
+    testXPath = path / "t10k-images-idx3-ubyte"
+    testYPath = path / "t10k-labels-idx1-ubyte"
+    trainXPath = path / "train-images-idx3-ubyte"
+    trainYPath = path / "train-labels-idx1-ubyte"
+  result.testX = loadIdx[uint8](testXPath).convert(T) / T(255)
+  result.testY = loadIdx[uint8](testYPath).oneHot(10).convert(T)
+  result.trainX = loadIdx[uint8](trainXPath).convert(T) / T(255)
+  result.trainY = loadIdx[uint8](trainYPath).oneHot(10).convert(T)
 
-let (train_x, train_y, test_x, test_y) = load_mnist[float32]("data")
+let (trainX, trainY, testX, testY) = loadMnist[float32]("data")
 
 let
   net = input("x")
     .reshape([-1, 28, 28, 1])
     .conv2(1, 5, 5, 8)
-    .leaky_relu() # Move after maxpool2?
+    .leakyRelu() # Move after maxpool2?
     .maxpool2()
     .conv2(8, 3, 3, 16)
-    .leaky_relu()
+    .leakyRelu()
     .maxpool2()
     .reshape([-1, 16 * 5 * 5])
     .dense(16 * 5 * 5, 10)
     .softmax()
     .target("predict")
-    .cross_entropy(input("y"))
+    .crossEntropy(input("y"))
     .target("loss")
     .backwards()
-    .optimize(adam.make_opt(eta=0.01))
+    .optimize(adam.makeOpt(eta=0.01))
     .target("fit")
   model = compile[float32](net)
-  #model = load_model[float32]("model.bin")
+  #model = loadModel[float32]("model.bin")
 
-write_file("model.gv", model.source.to_dot_graph("loss"))
+writeFile("model.gv", model.source.toDotGraph("loss"))
 
-echo test_x.shape
-echo test_y.shape
+echo testX.shape
+echo testY.shape
 
 var epoch = 0
 while true:
   let
     start = now()
-    test_loss = model.call("loss", {"x": test_x, "y": test_y})
+    testLoss = model.call("loss", {"x": testX, "y": testY})
     stop = now()
   echo stop - start
-  echo "Epoch: ", epoch, " Test Loss: ", test_loss
-  model.fit("fit", {"x": train_x, "y": train_y})
+  echo "Epoch: ", epoch, " Test Loss: ", testLoss
+  model.fit("fit", {"x": trainX, "y": trainY})
   model.save("model.bin")
   epoch += 1
 

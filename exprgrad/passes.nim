@@ -666,6 +666,7 @@ proc generate*(program: Program) =
           )
           var
             shape = ShapeConstraint(kind: ShapeDims,
+              priority: PriorityInferred,
               dest: kernel.write.tensor
             )
             prod = 1
