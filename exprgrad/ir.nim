@@ -271,7 +271,7 @@ type
 
 const
   SIDE_EFFECT_INSTRS* = {
-    InstrWrite,
+    InstrWrite, InstrOverwrite,
     InstrLoop, InstrIf, InstrThreads,
     InstrGpu, InstrBarrier, InstrCacheWrite
   }

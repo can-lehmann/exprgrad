@@ -70,6 +70,7 @@ proc compile*(program: Program) =
   program.inlineLoops()
   program.propagateConstants()
   program.liftInvariants()
+  program.deadCodeElim()
   program.collectClosures()
   program.inferTypes()
   program.validate()

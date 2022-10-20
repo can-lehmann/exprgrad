@@ -248,7 +248,10 @@ proc functionType*(ret: TypeRef,
     result = function_type(ret, nil, cuint(args.len), cint(ord(isVarArg)))
 
 proc structType*(elemTypes: openArray[TypeRef], packed: bool = false): TypeRef =
-  struct_type(elemTypes[0].unsafeAddr, cuint(elemTypes.len), LlvmBool(ord(packed)))
+  if elemTypes.len > 0:
+    result = struct_type(elemTypes[0].unsafeAddr, cuint(elemTypes.len), LlvmBool(ord(packed)))
+  else:
+    result = struct_type(nil, cuint(elemTypes.len), LlvmBool(ord(packed)))
 
 proc addIncoming*(phi: ValueRef,
                    vals: openArray[ValueRef],

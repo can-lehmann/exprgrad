@@ -268,8 +268,14 @@ proc foldLinearIndices*(program: Program) =
 proc deadCodeElim(instrs: var seq[Instr], used: var seq[bool]) =
   var it = instrs.len - 1
   while it >= 0:
-    let instr = instrs[it]
-    let isInstrUsed = used[instr.res] or instr.kind in SIDE_EFFECT_INSTRS
+    if instrs[it].body.len > 0:
+      instrs[it].body.deadCodeElim(used)
+    
+    let
+      instr = instrs[it]
+      isInstrUsed = instr.kind in SIDE_EFFECT_INSTRS or
+                    (instr.res != RegId(0) and used[instr.res]) or
+                    instr.body.len > 0
     if isInstrUsed:
       for arg in instr.args:
         used[arg] = true
@@ -300,7 +306,8 @@ proc deadCodeElim(reads: var seq[TensorOp], used: var seq[bool]) =
 proc deadCodeElim*(kernel: Kernel) =
   if kernel.generator.kind == GenNone:
     var used = newSeq[bool](kernel.regs.len)
-    used[kernel.write.data] = true
+    if kernel.write.data != RegId(0):
+      used[kernel.write.data] = true
     for dim in kernel.write.dims.mitems:
       dim.deadCodeElim(used)
     kernel.expr.instrs.deadCodeElim(used)
@@ -1510,12 +1517,18 @@ proc inferStaticShapes*(program: Program) =
           assert tensor.shape == shapes[id]
 
 type ConstantValue = object
-  isConstant: bool
-  case kind: TypeKind:
-    of TypeScalar: scalar: float64
-    of TypeIndex: index: int
-    of TypeBoolean: boolean: bool
-    of TypeArray: discard
+  case isConstant: bool:
+    of true:
+      case kind: TypeKind:
+        of TypeScalar: scalar: float64
+        of TypeIndex: index: int
+        of TypeBoolean: boolean: bool
+        of TypeArray: discard
+    of false:
+      reg: RegId
+
+proc init(_: typedesc[ConstantValue], reg: RegId): ConstantValue =
+  result = ConstantValue(isConstant: false, reg: reg)
 
 proc init(_: typedesc[ConstantValue], scalar: float64): ConstantValue =
   result = ConstantValue(isConstant: true, kind: TypeScalar, scalar: scalar)
@@ -1526,14 +1539,33 @@ proc init(_: typedesc[ConstantValue], index: int): ConstantValue =
 proc init(_: typedesc[ConstantValue], boolean: bool): ConstantValue =
   result = ConstantValue(isConstant: true, kind: TypeBoolean, boolean: boolean)
 
+proc isZero(value: ConstantValue): bool =
+  if value.isConstant:
+    case value.kind:
+      of TypeScalar: result = value.scalar == 0.0
+      of TypeIndex: result = value.index == 0
+      of TypeBoolean: result = value.boolean == false
+      else: discard
+
+proc isOne(value: ConstantValue): bool =
+  if value.isConstant:
+    case value.kind:
+      of TypeScalar: result = value.scalar == 1.0
+      of TypeIndex: result = value.index == 1
+      of TypeBoolean: result = value.boolean == true
+      else: discard
+
+
 proc propagateConstants(instrs: var seq[Instr],
                         values: var seq[ConstantValue],
                         tensors: seq[TensorDef]) =
   for instr in instrs.mitems:
-    if instr.body.len > 0:
-      instr.body.propagateConstants(values, tensors)
+    for arg in instr.args.mitems:
+      if not values[arg].isConstant:
+        assert values[arg].reg != RegId(0)
+        arg = values[arg].reg
     
-    var res = ConstantValue()
+    var res = ConstantValue.init(instr.res)
     
     template arg(index: int): ConstantValue = values[instr.args[index]]
     
@@ -1564,13 +1596,53 @@ proc propagateConstants(instrs: var seq[Instr],
       of InstrScalar: res = ConstantValue.init(instr.scalarLit)
       of InstrIndex: res = ConstantValue.init(instr.indexLit)
       of InstrBoolean: res = ConstantValue.init(instr.booleanLit)
-      of InstrAdd: binop(`+`)
-      of InstrSub: binop(`-`)
-      of InstrMul: binop(`*`)
-      of InstrDiv: binop(`/`, supportsIndex=false)
-      of InstrIndexDiv: binop(`div`, supportsScalar=false)
-      of InstrMod: binop(`mod`)
-      of InstrEq: binop(`==`, supportsBoolean=true)
+      of InstrAdd:
+        if arg(0).isZero:
+          res = arg(1)
+        elif arg(1).isZero:
+          res = arg(0)
+        else:
+          binop(`+`)
+      of InstrSub:
+        if arg(1).isZero:
+          res = arg(0)
+        else:
+          binop(`-`)
+      of InstrMul:
+        if arg(0).isZero:
+          res = arg(0)
+        elif arg(1).isZero:
+          res = arg(1)
+        elif arg(0).isOne:
+          res = arg(1)
+        elif arg(1).isOne:
+          res = arg(0) 
+        else:
+          binop(`*`)
+      of InstrDiv:
+        if arg(0).isZero:
+          res = arg(0)
+        elif arg(1).isOne:
+          res = arg(0)
+        else:
+          binop(`/`, supportsIndex=false)
+      of InstrIndexDiv:
+        if arg(0).isZero:
+          res = arg(0)
+        elif arg(1).isOne:
+          res = arg(0)
+        else:
+          binop(`div`, supportsScalar=false)
+      of InstrMod:
+        if arg(0).isZero:
+          res = arg(0)
+        else:
+          binop(`mod`)
+      of InstrEq:
+        if not arg(0).isConstant and not arg(1).isConstant and arg(0).reg == arg(1).reg:
+          res = ConstantValue.init(true)
+        else:
+          binop(`==`, supportsBoolean=true)
       of InstrLt: binop(`<`)
       of InstrLe: binop(`<=`)
       of InstrAnd: binop(`and`, supportsBoolean=true, supportsIndex=false, supportsScalar=false)
@@ -1606,6 +1678,11 @@ proc propagateConstants(instrs: var seq[Instr],
             of InstrShapeLen: res = ConstantValue.init(shape.len)
             else: raise CompilerError()
       else: discard
+    
+    if instr.body.len > 0:
+      for reg in instr.definedRegs():
+        values[reg] = ConstantValue.init(reg)
+      instr.body.propagateConstants(values, tensors)
     
     if instr.res != RegId(0):
       if res.isConstant:
