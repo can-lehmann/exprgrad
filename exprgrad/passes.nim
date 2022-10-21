@@ -1559,7 +1559,10 @@ proc isOne(value: ConstantValue): bool =
 proc propagateConstants(instrs: var seq[Instr],
                         values: var seq[ConstantValue],
                         tensors: seq[TensorDef]) =
-  for instr in instrs.mitems:
+  var it = 0
+  while it < instrs.len:
+    template instr: var Instr = instrs[it]
+    
     for arg in instr.args.mitems:
       if not values[arg].isConstant:
         assert values[arg].reg != RegId(0)
@@ -1677,6 +1680,18 @@ proc propagateConstants(instrs: var seq[Instr],
                 res = ConstantValue.init(dim)
             of InstrShapeLen: res = ConstantValue.init(shape.len)
             else: raise CompilerError()
+      of InstrLoop:
+        if arg(0).isConstant and arg(1).isConstant and instr.loopStep > 0:
+          let size = arg(1).index - arg(0).index
+          if size <= 0:
+            instrs.delete(it)
+            continue
+          elif size <= instr.loopStep:
+            values[instr.loopIter] = ConstantValue.init(instr.args[0])
+            let body = instr.body
+            instrs.delete(it)
+            instrs.insert(body, it)
+            continue
       else: discard
     
     if instr.body.len > 0:
@@ -1692,6 +1707,8 @@ proc propagateConstants(instrs: var seq[Instr],
           of TypeBoolean: instr = Instr(kind: InstrBoolean, booleanLit: res.boolean, res: instr.res)
           else: discard
       values[instr.res] = res
+    
+    it += 1
 
 proc propagateConstants*(program: Program) =
   ## Inline static shapes and propagate constants
