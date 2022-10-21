@@ -347,6 +347,19 @@ proc `==`*(a, b: Instr): bool =
         of InstrScalar: result = a.scalarLit == b.scalarLit
         of InstrBoolean: result = a.booleanLit == b.booleanLit
         of InstrShape: result = a.dim == b.dim
+        of InstrLoop:
+          result = a.loopIter == b.loopIter and
+                   a.loopStep == b.loopStep and
+                   a.loopFuseNext == b.loopFuseNext
+        of InstrThreads:
+          result = a.threadsClosure == b.threadsClosure and
+                   a.threadsBegin == b.threadsBegin and
+                   a.threadsEnd == b.threadsEnd
+        of InstrGpu:
+          result = a.gpuClosure == b.gpuClosure and
+                   a.gpuIndices == b.gpuIndices
+        of InstrSharedCache:
+          result = a.cacheSize == b.cacheSize
         else: discard
 
 proc hash*(instr: Instr): Hash =
@@ -382,24 +395,36 @@ proc `==`*(a, b: ShapeConstraint): bool =
       of ShapeLinear: result = a.reads == b.reads and a.write == b.write
       of ShapeCopy: result = a.src == b.src
 
-proc substitute*(instrs: var seq[Instr], subs: Table[RegId, RegId]) =
+proc substituteArgs*(instr: var Instr, subs: Table[RegId, RegId]) =
   template sub(x: var RegId) =
     if x in subs:
       x = subs[x]
   
+  for arg in instr.args.mitems:
+    sub(arg)
+
+proc substitute*(instrs: var seq[Instr], subs: Table[RegId, RegId])
+
+proc substitute*(instr: var Instr, subs: Table[RegId, RegId]) =
+  template sub(x: var RegId) =
+    if x in subs:
+      x = subs[x]
+  
+  instr.substituteArgs(subs)
+  sub(instr.res)
+  if instr.body.len > 0:
+    instr.body.substitute(subs)
+  
+  case instr.kind:
+    of InstrLoop: sub(instr.loopIter)
+    of InstrThreads:
+      sub(instr.threadsBegin)
+      sub(instr.threadsEnd)
+    else: discard
+
+proc substitute*(instrs: var seq[Instr], subs: Table[RegId, RegId]) =
   for instr in instrs.mitems:
-    for arg in instr.args.mitems:
-      sub(arg)
-    sub(instr.res)
-    if instr.body.len > 0:
-      instr.body.substitute(subs)
-    
-    case instr.kind:
-      of InstrLoop: sub(instr.loopIter)
-      of InstrThreads:
-        sub(instr.threadsBegin)
-        sub(instr.threadsEnd)
-      else: discard
+    instr.substitute(subs)
 
 proc substitute*(expr: var Expr, subs: Table[RegId, RegId]) =  
   expr.instrs.substitute(subs)
