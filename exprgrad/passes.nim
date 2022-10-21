@@ -1516,6 +1516,62 @@ proc inferStaticShapes*(program: Program) =
         if id in shapes:
           assert tensor.shape == shapes[id]
 
+proc inlineStaticShapes(instrs: var seq[Instr], tensors: seq[TensorDef]) =
+  for instr in instrs.mitems:
+    if instr.body.len > 0:
+      instr.body.inlineStaticShapes(tensors)
+    
+    if instr.kind notin {InstrLen, InstrShape, InstrShapeLen}:
+      continue
+    
+    let shape = tensors[instr.tensor].shape
+    if shape.len == 0:
+      continue
+    
+    let value = case instr.kind:
+      of InstrLen:
+        var prod = 1
+        for dim in shape:
+          if dim >= 0:
+            prod *= dim
+          else:
+            prod = -1
+            break
+        prod
+      of InstrShape:
+        if instr.dim < 0:
+          shape[shape.len + instr.dim]
+        else:
+          shape[instr.dim]
+      of InstrShapeLen: shape.len
+      else: raise CompilerError()
+    
+    if value >= 0:
+      instr = Instr(kind: InstrIndex, indexLit: value, res: instr.res)
+
+proc inlineStaticShapes*(program: Program) =
+  ## Replace InstrLen, InstrShape and InstrShapeLen with constant values if the
+  ## shape of the tensor is known at compile-time
+  program.assertPass("inlineStaticShapes",
+    produces={},
+    requires={StageStaticShapes, StageTensorInstrs},
+    preserves={
+      StageTensors, StageShapes, StageSortedShapes, StageFolded, StageBounds,
+      StageGenerated, StageTensorInstrs, StageStaticShapes
+    }
+  )
+  
+  for name, target in program.targets:
+    for kernel in target.kernels:
+      kernel.setup.inlineStaticShapes(program.tensors)
+      for loop in kernel.loops.mitems:
+        loop.start.setup.inlineStaticShapes(program.tensors)
+        loop.stop.setup.inlineStaticShapes(program.tensors)
+        loop.cache.inlineStaticShapes(program.tensors)
+      for cond in kernel.conds.mitems:
+        cond.instrs.inlineStaticShapes(program.tensors)
+      kernel.expr.instrs.inlineStaticShapes(program.tensors)
+
 type ConstantValue = object
   case isConstant: bool:
     of true:
@@ -1555,10 +1611,8 @@ proc isOne(value: ConstantValue): bool =
       of TypeBoolean: result = value.boolean == true
       else: discard
 
-
 proc propagateConstants(instrs: var seq[Instr],
-                        values: var seq[ConstantValue],
-                        tensors: seq[TensorDef]) =
+                        values: var seq[ConstantValue]) =
   var it = 0
   while it < instrs.len:
     template instr: var Instr = instrs[it]
@@ -1656,30 +1710,6 @@ proc propagateConstants(instrs: var seq[Instr],
             res = arg(1)
           else:
             res = arg(2)
-      of InstrLen, InstrShape, InstrShapeLen:
-        let shape = tensors[instr.tensor].shape
-        if shape.len > 0:
-          case instr.kind:
-            of InstrLen:
-              var prod = 1
-              for dim in shape:
-                if dim >= 0:
-                  prod *= dim
-                else:
-                  prod = -1
-                  break
-              if prod >= 0:
-                res = ConstantValue.init(prod)
-            of InstrShape:
-              let dim =
-                if instr.dim < 0:
-                  shape[shape.len + instr.dim]
-                else:
-                  shape[instr.dim]
-              if dim >= 0:
-                res = ConstantValue.init(dim)
-            of InstrShapeLen: res = ConstantValue.init(shape.len)
-            else: raise CompilerError()
       of InstrLoop:
         if arg(0).isConstant and arg(1).isConstant and instr.loopStep > 0:
           let size = arg(1).index - arg(0).index
@@ -1697,7 +1727,7 @@ proc propagateConstants(instrs: var seq[Instr],
     if instr.body.len > 0:
       for reg in instr.definedRegs():
         values[reg] = ConstantValue.init(reg)
-      instr.body.propagateConstants(values, tensors)
+      instr.body.propagateConstants(values)
     
     if instr.res != RegId(0):
       if res.isConstant:
@@ -1711,7 +1741,7 @@ proc propagateConstants(instrs: var seq[Instr],
     it += 1
 
 proc propagateConstants*(program: Program) =
-  ## Inline static shapes and propagate constants
+  ## Propagate constants
   program.assertPass("propagateConstants",
     produces={},
     requires={StageStaticShapes, StageTensorInstrs, StageLoops, StageConditions},
@@ -1724,8 +1754,8 @@ proc propagateConstants*(program: Program) =
   for name, target in program.targets:
     for kernel in target.kernels:
       var values = newSeq[ConstantValue](kernel.regs.len)
-      kernel.setup.propagateConstants(values, program.tensors)
-      kernel.expr.instrs.propagateConstants(values, program.tensors)
+      kernel.setup.propagateConstants(values)
+      kernel.expr.instrs.propagateConstants(values)
 
 proc makeTensorLookups*(program: Program) =
   program.assertPass("makeTensorLookups",

@@ -65,6 +65,7 @@ proc compile*(program: Program) =
   program.inferCacheSizes()
   program.cacheTensors()
   program.inlineTensorOps()
+  program.inlineStaticShapes()
   program.unfoldLoopBounds()
   program.inlineConditions()
   program.inlineLoops()
