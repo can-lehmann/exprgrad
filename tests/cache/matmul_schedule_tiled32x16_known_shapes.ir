@@ -2,7 +2,6 @@ tensor1 = input(a)
 tensor2 = input(b)
 c tensor0:
   kernel:
-    reg25 = tensor1.shape[1]
     gpu (local reg14, group reg68, size 32) in 0 to 64
         (local reg15, group reg70, size 16) in 0 to 64:
       reg11 = (reg68 * 32)
@@ -21,7 +20,7 @@ c tensor0:
       loop reg9 in 0 to 64 step 16:
         barrier()
         if reg30:
-          reg28 = read[tensor1](((reg9 + (reg18 mod 16)) + ((reg10 + (reg18 div 16)) * reg25)))
+          reg28 = read[tensor1](((reg9 + (reg18 mod 16)) + ((reg10 + (reg18 div 16)) * 64)))
           cachewrite(reg12, reg18, reg28)
         reg41 = read[tensor2]((reg35 + ((reg15 + reg9) * 64)))
         cachewrite(reg13, reg33, reg41)
