@@ -12,9 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Wrapper for the llvm C-API
+# Wrapper for the LLVM C-API
 # The LLVM C-API is licensed under Apache-2.0 WITH LLVM-exception
-# See https://llvm.org/LICENSE.txt for more details.
+# See LLVM_LICENSE.txt (or https://llvm.org/LICENSE.txt) for more details.
 
 {.passc: gorge("llvm-config-13 --cflags").}
 {.passl: gorge("llvm-config-13 --libs").}
