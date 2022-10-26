@@ -95,6 +95,18 @@ proc findInlineRegs(kernel: Kernel): seq[bool] =
   kernel.setup.findInlineRegs(result, declLevels, 0)
   kernel.expr.instrs.findInlineRegs(result, declLevels, 1)
 
+proc stringify(closure: ParallelClosure, regs: var seq[string]): string =
+  result = "closure["
+  for it, tensor in closure.tensors:
+    if it != 0:
+      result &= ", "
+    result &= $tensor
+  result &= "]("
+  for it, reg in closure.regs:
+    if it != 0:
+      result &= ", "
+    result &= $reg
+  result &= ")"
 
 proc stringify(instr: Instr, regs: var seq[string], level: int): string =
   case instr.kind:
@@ -110,7 +122,11 @@ proc stringify(instr: Instr, regs: var seq[string], level: int): string =
     of InstrThreads:
       result &= "threads (" & $instr.threadsBegin & ", " & $instr.threadsEnd & ") in "
       result &= regs[instr.args[0]] & " to " & regs[instr.args[1]]
-      result &= " min_size " & regs[instr.args[2]] & ":\n"
+      result &= " min_size " & regs[instr.args[2]]
+      if instr.threadsClosure != ParallelClosure():
+        result &= "\n" & makeIndent(level) & makeIndent(len("threads "), width=1)
+        result &= instr.threadsClosure.stringify(regs)
+      result &= ":\n"
       result &= instr.body.stringify(regs, level + 1)
     of InstrGpu:
       result &= "gpu"
