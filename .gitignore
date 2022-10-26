@@ -29,10 +29,13 @@ tests/test_gpu
 tests/test_errors
 tests/test_talks
 tests/test_idxformat
+tests/test_ppmformat
 tests/data.bin
+tests/data.ppm
 tests/module.bc
 tests/module.ll
 old/
 docs/assets/social-banner/
 data.bin
+data.ppm
 
