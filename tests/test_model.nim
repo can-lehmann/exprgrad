@@ -271,6 +271,26 @@ test "derive/polynomial":
     let x = Tensor.linspace(-8'f32..8'f32, 17)
     check model.call("x^2+2x+1", {"x": x}) == x * 2.0 + Tensor.new([17], 2'f32)
 
+test "derive/multiply":
+  let x = input("x")
+  a*{it} ++= x{it} * x{it} * x{it} | it
+  b*{it} ++= x{it} / 2.0 | it
+  c*{it} ++= 1.0 / x{it} | it
+  d*{it} ++= x{it} / x{it} | it
+  let model = compile[float32]([
+    a.backwards().grad(x).target("x^3"),
+    b.backwards().grad(x).target("x/2"),
+    c.backwards().grad(x).target("1/x"),
+    d.backwards().grad(x).target("x/x")
+  ])
+  
+  block:
+    let x = Tensor.linspace(-8'f32..8'f32, 16)
+    check model.call("x^3", {"x": x}) == 3'f32 * squares(x)
+    check model.call("x/2", {"x": x}) == Tensor.new([16], 0.5'f32)
+    check model.call("1/x", {"x": x}) == -1'f32 / squares(x)
+    check squares(model.call("x/x", {"x": x}) - Tensor.new([16], 0'f32)).sum() < 0.00001
+
 test "derive/trigonometry":
   let x = input("x")
   a*{it} ++= sin(x{it}) | it
