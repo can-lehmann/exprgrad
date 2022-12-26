@@ -396,7 +396,7 @@ proc verify_function*(module: ModuleRef, failureAction: VerifierFailureAction): 
 proc create_execution_engine_for_module*(engine: ptr ExecutionEngineRef, module: ModuleRef, err: ptr cstring): cint {.importc: "LLVMCreateExecutionEngineForModule".}
 proc create_jit_compiler_for_module*(engine: ptr ExecutionEngineRef, module: ModuleRef, optLevel: cuint, err: ptr cstring): cint {.importc: "LLVMCreateJITCompilerForModule".}
 proc dispose_execution_engine*(engine: ExecutionEngineRef) {.importc: "LLVMDisposeExecutionEngine".}
-proc get_function_address*(engine: ExecutionEngineRef, name: cstring): pointer {.importc: "LLVMGetFunctionAddress".}
+proc get_function_address*(engine: ExecutionEngineRef, name: cstring): uint64 {.importc: "LLVMGetFunctionAddress".}
 proc add_global_mapping*(engine: ExecutionEngineRef, global: ValueRef, address: pointer) {.importc: "LLVMAddGlobalMapping".}
 proc link_in_mcjit*() {.importc: "LLVMLinkInMCJIT".}
 proc get_execution_engine_target_data*(engine: ExecutionEngineRef): TargetDataRef {.importc: "LLVMGetExecutionEngineTargetData".}
