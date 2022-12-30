@@ -118,7 +118,7 @@ proc literal*[T](arr: openArray[T]): auto =
     builder.children.add(ExprBuilder(literal(value)))
   result = Array[typeof(literal(arr[0]))](builder)
 
-proc iteratorLiteral*(name: string, start: Index = nil, stop: Index = nil): Index =
+proc iteratorLiteral*(name: string, start: Index = Index(nil), stop: Index = Index(nil)): Index =
   result = Index(ExprBuilder(kind: ExprIter,
     iter: name.nimIdentNormalize()
   ))

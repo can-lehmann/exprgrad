@@ -370,7 +370,7 @@ proc saveBitcode*(module: ModuleRef, path: string) =
 proc loadBitcode*(ctx: ContextRef, path: string): ModuleRef =
   var
     msg: cstring = nil
-    mem: MemoryBufferRef = nil
+    mem = MemoryBufferRef(nil)
   defer:
     if not msg.isNil:
       msg.dispose_message()

@@ -241,7 +241,7 @@ proc toLlvm(instrs: seq[Instr], ctx: Context) =
           of InstrExp: ctx.builtin.exp
           of InstrLn: ctx.builtin.ln
           of InstrSqrt: ctx.builtin.sqrt
-          else: nil
+          else: ValueRef(nil)
         res = builder.buildCall2(
           ctx.builtin.scalarUnaryIntrinsicSignature(),
           fn, [ctx[instr.args[0]]], cstring($instr.res)
@@ -249,7 +249,7 @@ proc toLlvm(instrs: seq[Instr], ctx: Context) =
       of InstrPow:
         let fn = case instr.kind:
           of InstrPow: ctx.builtin.pow
-          else: nil
+          else: ValueRef(nil)
         res = builder.buildCall2(
           ctx.builtin.scalarBinaryIntrinsicSignature(),
           fn, [ctx[instr.args[0]], ctx[instr.args[1]]],
@@ -618,7 +618,7 @@ proc newJit*(module: ModuleRef, builtin: JitBuiltin): Jit =
     targetFeatures = get_host_cpu_features()
     targetCpu = get_host_cpu_name()
   module.set_target(triple)
-  var target: TargetRef = nil
+  var target = TargetRef(nil)
   if get_target_from_triple(triple, target.addr, err.addr) != 0:
     raise JitError(msg: $err)
   let machine = create_target_machine(
